@@ -452,13 +452,77 @@ def build_master_header(header: Dict[str, Any], rows: List[Dict[str, Any]]):
     )
 
 
+# ---------------------------------------------------------------------------
+# Serial line splitting (handles 50+ serial numbers per item)
+# ---------------------------------------------------------------------------
+
+# Mirror render_core.py column geometry
+_CONTENT_AVAIL_PTS = 365.4 - 88.2 - 3.0   # 274.2 pts available in content col
+_LINE2_FONT_SIZE   = 7                      # Helvetica 7pt — must match render_core
+
+
+def _str_width(text):
+    """String width in pts at Helvetica 7pt; falls back to 4.2 pts/char."""
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        return pdfmetrics.stringWidth(text, "Helvetica", _LINE2_FONT_SIZE)
+    except Exception:
+        return len(text) * 4.2
+
+
+def _build_serial_lines(lin, nsn, serials):
+    """
+    Chunk LIN/NSN/serial data into column-width strings for the PDF renderer.
+
+    Returns:
+      [0]  "LIN: <lin>  [NSN: <nsn>  ]SN: s1, s2, ..."  (as many serials as fit)
+      [1+] "    s3, s4, ..."                              (indented continuations)
+    If no serials, returns the single metadata string.
+    """
+    prefix_parts = []
+    if lin:
+        prefix_parts.append(f"LIN: {lin}")
+    if nsn:
+        prefix_parts.append(f"NSN: {nsn}")
+    prefix = "  ".join(prefix_parts)
+
+    if not serials:
+        return [prefix] if prefix else [""]
+
+    first_prefix = (prefix + "  SN: ") if prefix else "SN: "
+    cont_indent = "    "
+
+    lines = []
+    current = first_prefix
+    cur_pfx = first_prefix
+
+    for sn in serials:
+        sn = str(sn).strip()
+        if not sn:
+            continue
+        candidate = current + sn if current == cur_pfx else current + ", " + sn
+
+        if _str_width(candidate) <= _CONTENT_AVAIL_PTS:
+            current = candidate
+        else:
+            lines.append(current)
+            cur_pfx = cont_indent
+            current = cont_indent + sn
+
+    if current.strip():
+        lines.append(current)
+
+    return lines or [first_prefix.rstrip()]
+
+
 def rows_to_bom_items(rows: List[Dict[str, Any]]):
     """
     Convert finalized UI rows into render_core.BomItem objects.
 
-    Line 1 of each row = MODEL.
-    Line 2 (carried in BomItem.nsn) = 'LIN: <lin>  NSN: <nsn>  SN: <s1>, <s2>...'
-    Box numbers are re-sequenced 1..N here defensively.
+    Items with more serial numbers than fit on one PDF line expand into a
+    primary BomItem plus one or more continuation BomItems (is_continuation=True).
+    The renderer skips box number, model, qty, UOI, and totals for continuation
+    rows — only the wrapped serial text is drawn.
     """
     from render_core import BomItem
 
@@ -471,22 +535,26 @@ def rows_to_bom_items(rows: List[Dict[str, Any]]):
             serials = [s.strip() for s in serials.split(",") if s.strip()]
         qty = int(r.get("qty", len(serials) or 1) or 1)
 
-        line2_parts = []
-        if lin:
-            line2_parts.append(f"LIN: {lin}")
-        if nsn:
-            line2_parts.append(f"NSN: {nsn}")
-        if serials:
-            line2_parts.append("SN: " + ", ".join(str(s) for s in serials))
-        line2 = "  ".join(line2_parts)
+        serial_lines = _build_serial_lines(lin, nsn, serials)
 
         items.append(BomItem(
             line_no=i,
             description=normalize_model(str(r.get("model", ""))),
-            nsn=line2,
+            nsn=serial_lines[0],
             qty=qty,
             unit_of_issue="EA",
         ))
+
+        for extra in serial_lines[1:]:
+            items.append(BomItem(
+                line_no=i,
+                description="",
+                nsn=extra,
+                qty=qty,
+                unit_of_issue="EA",
+                is_continuation=True,
+            ))
+
     return items
 
 

@@ -56,6 +56,7 @@ class BomItem:
     nsn: str = ""            # Line 2 of the row (LIN/NSN/SN text in master mode)
     qty: int = 1
     unit_of_issue: str = "EA"
+    is_continuation: bool = False  # overflow serial row — skip box/qty/UOI/total
 
 
 @dataclass
@@ -231,50 +232,49 @@ def generate_dd1750_overlay(
                 can.setFont("Helvetica", 9)
                 can.drawString(450, 696, str(header.date)[:20])
 
-    # === TABLE CONTENT (verbatim from v25) ===
+    # === TABLE CONTENT ===
     for i, item in enumerate(items):
         # Calculate Y position for this row (rows go top to bottom)
         row_top = Y_TABLE_TOP - (i * ROW_H)
         y_line1 = row_top - 10.0    # First line (description)
         y_line2 = row_top - 20.0    # Second line (NSN / master line-2 text)
 
-        # Box number (centered) — in master mode this is the box number
-        can.setFont("Helvetica", 9)
-        box_center_x = (X_BOX_L + X_BOX_R) / 2
-        can.drawCentredString(box_center_x, y_line1, str(item.line_no))
+        if not item.is_continuation:
+            # Box number (centered) — in master mode this is the box number
+            can.setFont("Helvetica", 9)
+            box_center_x = (X_BOX_L + X_BOX_R) / 2
+            can.drawCentredString(box_center_x, y_line1, str(item.line_no))
 
-        # Line 1: description / model (left-aligned with padding)
-        can.setFont("Helvetica", 8)
-        desc = item.description[:55] if len(item.description) > 55 else item.description
-        can.drawString(X_CONTENT_L + PAD_X, y_line1, desc)
+            # Line 1: description / model (left-aligned with padding)
+            can.setFont("Helvetica", 8)
+            desc = item.description[:55] if len(item.description) > 55 else item.description
+            can.drawString(X_CONTENT_L + PAD_X, y_line1, desc)
 
-        # Line 2: NSN text (in master mode, the full "LIN: ... NSN: ... SN: ..." string)
+            # Unit of Issue (centered) — always EA
+            can.setFont("Helvetica", 9)
+            uoi_center_x = (X_UOI_L + X_UOI_R) / 2
+            can.drawCentredString(uoi_center_x, y_line1, item.unit_of_issue or "EA")
+
+            # Initial Operation quantity (d) — centered
+            init_center_x = (X_INIT_L + X_INIT_R) / 2
+            can.drawCentredString(init_center_x, y_line1, str(item.qty))
+
+            # Running Spares (e) — always 0 for an initial packing list
+            spares_center_x = (X_SPARES_L + X_SPARES_R) / 2
+            can.drawCentredString(spares_center_x, y_line1, "0")
+
+            # Total (f = d + e) — centered
+            total_center_x = (X_TOTAL_L + X_TOTAL_R) / 2
+            can.drawCentredString(total_center_x, y_line1, str(item.qty))
+
+        # Line 2: NSN/SN text — drawn for all rows (primary and continuation).
+        # Pre-split by rows_to_bom_items() so each chunk already fits the column.
         if item.nsn:
             can.setFont("Helvetica", 7)
-            # In master mode item.nsn already contains the full label text; in
-            # v25 mode it was a bare NSN that got a "NSN: " prefix. We detect
-            # which by checking whether the text already starts with a label.
             line2_text = item.nsn
-            if not line2_text.upper().startswith(("LIN:", "NSN:", "SN:")):
+            if not item.is_continuation and not line2_text.upper().startswith(("LIN:", "NSN:", "SN:")):
                 line2_text = f"NSN: {line2_text}"
-            can.drawString(X_CONTENT_L + PAD_X, y_line2, line2_text[:90])
-
-        # Unit of Issue (centered) — always EA
-        can.setFont("Helvetica", 9)
-        uoi_center_x = (X_UOI_L + X_UOI_R) / 2
-        can.drawCentredString(uoi_center_x, y_line1, item.unit_of_issue or "EA")
-
-        # Initial Operation quantity (d) — centered
-        init_center_x = (X_INIT_L + X_INIT_R) / 2
-        can.drawCentredString(init_center_x, y_line1, str(item.qty))
-
-        # Running Spares (e) — always 0 for an initial packing list
-        spares_center_x = (X_SPARES_L + X_SPARES_R) / 2
-        can.drawCentredString(spares_center_x, y_line1, "0")
-
-        # Total (f = d + e) — centered
-        total_center_x = (X_TOTAL_L + X_TOTAL_R) / 2
-        can.drawCentredString(total_center_x, y_line1, str(item.qty))
+            can.drawString(X_CONTENT_L + PAD_X, y_line2, line2_text)
 
     # === "NOTHING FOLLOWS" MARKER (verbatim from v25) ===
     # Drawn on the last page, on the row immediately after the last item.
