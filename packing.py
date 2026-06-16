@@ -70,6 +70,78 @@ def default_box_map(boms: list[dict]) -> dict:
     return box_map
 
 
+def _norm(s: str) -> str:
+    """Uppercase + collapse internal whitespace (stdlib-only, no deps)."""
+    return " ".join((s or "").upper().split())
+
+
+def _group_key(bom: dict):
+    """
+    Identity used to group like end items into the same box.
+
+    Same LIN + NIIN  → same box (50 identical M4s collapse to one box).
+    Falls back to normalized model, then to bom_id so unknowns NEVER merge
+    (a BOM with no LIN/NIIN/model gets its own box rather than pooling with
+    other unidentified BOMs).
+    """
+    lin  = (bom.get("lin") or "").strip().upper()
+    niin = (bom.get("end_item_niin") or "").strip()
+    if lin or niin:
+        return ("LN", lin, niin)
+    model = _norm(bom.get("model") or bom.get("nomenclature") or "")
+    return ("M", model) if model else ("ID", bom["bom_id"])
+
+
+def grouped_box_map(boms: list[dict]) -> dict:
+    """
+    Build the starting assignment map with LIKE END ITEMS GROUPED.
+
+    End items that share the same LIN/NIIN land in the SAME box; box numbers
+    are assigned 1..N in first-appearance order with NO gaps.  This is the
+    default packing model: an arms room with 50 identical M4s starts as one
+    box (qty 50), and the user pulls individual end items into their own box
+    later via the 'separate' move.
+
+    Contrast with default_box_map() (1-BOM-per-box), which this replaces as the
+    ingest default.  Because numbering is contiguous by construction, condensing
+    can never leave a gap.
+
+    Returns:
+        dict mapping item_key(bom_id, line_no) -> box_num (int).  Empty when
+        boms is empty.
+    """
+    group_to_box: dict = {}
+    for bom in boms:
+        k = _group_key(bom)
+        if k not in group_to_box:
+            group_to_box[k] = len(group_to_box) + 1
+
+    box_map: dict[str, int] = {}
+    for bom in boms:
+        box = group_to_box[_group_key(bom)]
+        for item in bom.get("items", []):
+            box_map[item_key(bom["bom_id"], item["line_no"])] = box
+    return box_map
+
+
+def compact_box_map(box_map: dict) -> dict:
+    """
+    Re-sequence the distinct box numbers to 1..N (ascending), removing gaps
+    while preserving relative order.  Pure — returns a new dict.
+
+    This is the "recount" applied after condensing/regrouping so the box count
+    is always accurate and contiguous.
+
+    Example:
+        compact_box_map({"A:1": 1, "B:1": 6, "C:1": 9}) ->
+            {"A:1": 1, "B:1": 2, "C:1": 3}
+    """
+    if not box_map:
+        return {}
+    remap = {old: new for new, old in enumerate(sorted(set(box_map.values())), start=1)}
+    return {k: remap[v] for k, v in box_map.items()}
+
+
 def reassign(box_map: dict, key: str, box_num: int) -> dict:
     """
     Return a NEW box_map with one item moved to a different box.
@@ -292,6 +364,8 @@ def condense_items(items: list[dict]) -> list[dict]:
 __all__ = [
     "item_key",
     "default_box_map",
+    "grouped_box_map",
+    "compact_box_map",
     "reassign",
     "occupied_boxes",
     "items_for_box",

@@ -345,8 +345,11 @@ def ingest():
         if shr_dict:
             reconciliation = reconcile_mod.reconcile(boms, shr_dict)
 
-        # --- Default box assignment (1 BOM per box) ---
-        box_map = packing.default_box_map(boms)
+        # --- Default box assignment: GROUP like end items (same LIN/NIIN) ---
+        # An arms room with 50 identical M4s starts as one box (qty 50), boxes
+        # numbered 1..N with no gaps.  The user pulls individual end items into
+        # their own box later via a 'separate' move.
+        box_map = packing.grouped_box_map(boms)
 
     # --- Suggested header ---
     # UIC: pick the most common non-empty value from the BOMs.
@@ -443,6 +446,21 @@ def assign():
                 box_map.pop(packing.item_key(bom_id, item["line_no"]), None)
             continue
 
+        # Separate move: pull one end item out of its shared box into a new box
+        # of its own (the next free number).  Inverse of grouping — e.g. take
+        # one M4 out of the box of 50 so it ships separately.
+        if move.get("separate"):
+            bom_id = move.get("bom_id")
+            bom = next((b for b in boms if b["bom_id"] == bom_id), None)
+            if bom is None:
+                continue
+            occ = packing.occupied_boxes(box_map)
+            new_box = (max(occ) + 1) if occ else 1
+            for item in bom.get("items", []):
+                key = packing.item_key(bom_id, item["line_no"])
+                box_map = packing.reassign(box_map, key, new_box)
+            continue
+
         target_box = int(move["box_num"])
 
         if "item_key" in move:
@@ -468,6 +486,36 @@ def assign():
         rep = _representative_box(bom, box_map)
         box_by_bom[bom["bom_id"]] = rep
 
+    return jsonify({
+        "occupied_boxes": packing.occupied_boxes(box_map),
+        "box_by_bom":     box_by_bom,
+    })
+
+
+# ---------------------------------------------------------------------------
+# POST /regroup — re-group like end items (same LIN/NIIN) and recount boxes
+# ---------------------------------------------------------------------------
+
+@app.route("/regroup", methods=["POST"])
+def regroup():
+    """
+    Body: {"job_id": "..."}
+    Rebuild the box assignment by grouping like end items (same LIN/NIIN) into
+    shared boxes, numbered 1..N with no gaps.  This is the "Condense" action:
+    it normalizes the packing list back to one box per distinct end item and
+    guarantees an accurate, contiguous box count.  Resets any manual splits.
+    """
+    data = request.get_json(silent=True) or {}
+    job_id = data.get("job_id")
+    job = JOBS.get(job_id)
+    if job is None:
+        return jsonify({"error": f"Job '{job_id}' not found."}), 404
+
+    boms = job["boms"]
+    box_map = packing.grouped_box_map(boms)
+    job["box_map"] = box_map
+
+    box_by_bom = {b["bom_id"]: _representative_box(b, box_map) for b in boms}
     return jsonify({
         "occupied_boxes": packing.occupied_boxes(box_map),
         "box_by_bom":     box_by_bom,

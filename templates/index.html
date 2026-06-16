@@ -124,6 +124,7 @@
   tr.zoh-row td { background: #fffaf0; }
   tr.row-excluded td { opacity: 0.45; text-decoration: line-through; }
   .badge-zoh { background: #feebc8; color: #744210; }
+  .badge-grp { background: #c3dafe; color: #2a4365; }
   .btn-xs { display:inline-block; font-size: 0.66rem; padding: 2px 6px; margin-top: 4px;
             cursor: pointer; border: 1px solid #cbd5e0; border-radius: 4px;
             background: #edf2f7; color: var(--primary); }
@@ -272,7 +273,7 @@
   <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
     <div class="boxes-bar" id="boxesBar">Boxes in use: —</div>
     <button class="btn-ghost btn-sm" id="autoAssignBtn" onclick="autoAssign()">Auto-assign 1..N</button>
-    <button class="btn-ghost btn-sm" id="condenseDupBtn" onclick="condenseDuplicates()">Condense duplicate end items</button>
+    <button class="btn-ghost btn-sm" id="condenseDupBtn" onclick="condenseDuplicates()" title="Group like end items (same LIN/NIIN) into shared boxes and recount 1..N">Re-group like items (recount 1..N)</button>
     <span id="condenseDupStatus" class="muted" style="font-size:0.8rem;"></span>
   </div>
 
@@ -605,6 +606,15 @@ function renderReviewTable() {
   const tbody = $("reviewBody");
   tbody.innerHTML = "";
 
+  /* Count how many BOMs share each box so we can offer "Separate" only on
+     grouped boxes (a box of 50 M4s) and not on solo boxes. */
+  const boxCounts = {};
+  STATE.boms.forEach((bom, idx) => {
+    if (bom._excluded) return;
+    const b = bom.box_num != null ? bom.box_num : idx + 1;
+    boxCounts[b] = (boxCounts[b] || 0) + 1;
+  });
+
   STATE.boms.forEach((bom, idx) => {
     const rowId    = `bom-${bom.bom_id}`;
     const itemsId  = `items-${bom.bom_id}`;
@@ -629,11 +639,20 @@ function renderReviewTable() {
     if (zoh)      tr.classList.add("zoh-row");
     if (excluded) tr.classList.add("row-excluded");
 
+    const curBox  = bom.box_num != null ? bom.box_num : idx + 1;
+    const shared  = !excluded && (boxCounts[curBox] || 0) > 1;
     const zohBadge = zoh
       ? `<span class="badge badge-zoh" title="No on-hand components — verify this box is physically present">ZERO ON-HAND</span>`
       : "";
+    const grpBadge = shared
+      ? `<span class="badge badge-grp" title="${boxCounts[curBox]} like items grouped in box ${curBox}">${boxCounts[curBox]}× IN BOX ${curBox}</span>`
+      : "";
     const exclBtn = `<button class="btn-xs" title="Keep or drop this box before generating"
         onclick="toggleExclude('${bom.bom_id}')">${excluded ? "Restore" : "Exclude"}</button>`;
+    const sepBtn = shared
+      ? `<button class="btn-xs" title="Pull this end item into its own new box"
+          onclick="separateBom('${bom.bom_id}')">Separate</button>`
+      : "";
 
     tr.innerHTML = `
       <td class="col-exp">
@@ -641,14 +660,14 @@ function renderReviewTable() {
       </td>
       <td class="col-box">
         <input type="number" min="1" id="box-${bom.bom_id}"
-               value="${esc(bom.box_num != null ? bom.box_num : idx+1)}"
+               value="${esc(curBox)}"
                ${excluded ? "disabled" : ""}
                onchange="assignBox('${bom.bom_id}', this.value)"><br>
-        ${exclBtn}
+        ${exclBtn}${sepBtn}
       </td>
       <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
           title="${esc(bom.filename)}">${esc(bom.filename)}</td>
-      <td>${zohBadge}${esc(bom.nomenclature)}</td>
+      <td>${zohBadge}${grpBadge}${esc(bom.nomenclature)}</td>
       <td>${esc(bom.model)}</td>
       <td class="col-lin">${esc(bom.lin)}</td>
       <td class="col-niin">${esc(bom.end_item_niin)}</td>
@@ -951,60 +970,20 @@ async function autoAssign() {
   }
 }
 
-/* Condense duplicate end items — group by (LIN|MODEL), collapse to shared min box number.
-   Sends one POST /assign with all changed rows, then refreshes the boxes-in-use bar. */
+/* Re-group like end items (same LIN/NIIN) into shared boxes and recount 1..N.
+   Server-side via POST /regroup so the box count is always accurate and
+   contiguous (no vacated-box gaps). Resets manual splits back to grouped. */
 async function condenseDuplicates() {
   if (!STATE.boms.length) return;
 
   const statusEl = $("condenseDupStatus");
-  statusEl.textContent = "Working…";
+  statusEl.textContent = "Re-grouping…";
 
-  /* Group bom_ids by key = LIN|MODEL (uppercased, trimmed) */
-  const groups = {}; // key -> array of { bom_id, currentBox }
-  STATE.boms.forEach(bom => {
-    const lin   = (bom.lin   || "").toString().trim().toUpperCase();
-    const model = (bom.model || "").toString().trim().toUpperCase();
-    const key   = lin + "|" + model;
-    if (!groups[key]) groups[key] = [];
-    /* Read the current box from the DOM input (user may have changed it) */
-    const inp    = $("box-" + bom.bom_id);
-    const boxNum = inp ? parseInt(inp.value, 10) : bom.box_num;
-    groups[key].push({ bom_id: bom.bom_id, boxNum: isNaN(boxNum) ? 1 : boxNum });
-  });
-
-  /* Find groups with 2+ members — compute the minimum box number for each */
-  const moves = [];
-  let dupGroupCount = 0;
-  for (const [key, members] of Object.entries(groups)) {
-    if (members.length < 2) continue;
-    dupGroupCount++;
-    const minBox = Math.min(...members.map(m => m.boxNum));
-    members.forEach(m => {
-      if (m.boxNum !== minBox) {
-        moves.push({ bom_id: m.bom_id, box_num: minBox });
-        /* Update DOM immediately for responsiveness */
-        const inp = $("box-" + m.bom_id);
-        if (inp) inp.value = minBox;
-      }
-    });
-  }
-
-  if (dupGroupCount === 0) {
-    statusEl.textContent = "No duplicates found.";
-    return;
-  }
-
-  if (moves.length === 0) {
-    statusEl.textContent = `${dupGroupCount} duplicate group(s) already share the same box — nothing to move.`;
-    return;
-  }
-
-  /* Push all changes in one /assign call */
   try {
-    const resp = await fetch("/assign", {
+    const resp = await fetch("/regroup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: STATE.job_id, moves }),
+      body: JSON.stringify({ job_id: STATE.job_id }),
     });
     const data = await resp.json();
     if (!resp.ok) {
@@ -1013,17 +992,50 @@ async function condenseDuplicates() {
     }
     STATE.occupied_boxes = data.occupied_boxes || STATE.occupied_boxes;
 
-    /* Sync local bom box_num from response */
+    /* Sync local bom box_num from response, then re-render so grouped
+       box numbers update on every row + the items sub-tables. */
     if (data.box_by_bom) {
       STATE.boms.forEach(b => {
         if (data.box_by_bom[b.bom_id] != null) b.box_num = data.box_by_bom[b.bom_id];
       });
     }
-
+    renderReviewTable();
     updateBoxesBar();
-    statusEl.textContent = `Condensed ${dupGroupCount} duplicate group(s) into shared boxes.`;
+
+    const n = (STATE.occupied_boxes || []).length;
+    statusEl.textContent = `Re-grouped like items into ${n} box${n === 1 ? "" : "es"} (1..${n}).`;
   } catch (e) {
-    statusEl.textContent = "Condense failed: " + e.message;
+    statusEl.textContent = "Re-group failed: " + e.message;
+  }
+}
+
+/* Separate one end item out of its shared box into a new box of its own —
+   POST /assign with a 'separate' move. Used to pull a single unit out of a
+   grouped box (e.g. one M4 out of the box of 50). */
+async function separateBom(bomId) {
+  const bom = STATE.boms.find(b => b.bom_id === bomId);
+  if (!bom) return;
+  try {
+    const resp = await fetch("/assign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: STATE.job_id, moves: [{ bom_id: bomId, separate: true }] }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      alert("Separate failed: " + (data.error || resp.statusText));
+      return;
+    }
+    STATE.occupied_boxes = data.occupied_boxes || STATE.occupied_boxes;
+    if (data.box_by_bom) {
+      STATE.boms.forEach(b => {
+        if (data.box_by_bom[b.bom_id] != null) b.box_num = data.box_by_bom[b.bom_id];
+      });
+    }
+    renderReviewTable();
+    updateBoxesBar();
+  } catch (e) {
+    alert("Separate fetch failed: " + e.message);
   }
 }
 
