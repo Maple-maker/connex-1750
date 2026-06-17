@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+	xmlns="http://www.w3.org/2000/svg"
+	xmlns:svg="http://www.w3.org/2000/svg"
+	xmlns:xlink="http://www.w3.org/1999/xlink"
+	version="1.1"
+	width="600" height="600" viewBox="-300 -300 600 600">
+	<title>77th Aviation Brigade Shoulder Sleeve Insignia</title>
+	<path d="M 0,-300 300,0 0,300 -300,0 z"
+		style="fill:#200080;fill-opacity:1;stroke:none" />
+	<path d="M 0,-266.0625 -266.0625,0 0,266.0625 266.0625,0 0,-266.0625 z"
+		style="fill:white;stroke:none" />
+	<g id="Spearheads2">
+		<path d="M 12,48 C 12,78 12,86 42,105 19,145 12,184 0,240 -12,184 -19,145 -42,105 -12,86 -12,78 -12,48 L -12,-48 C -12,-78 -12,-86 -42,-105 -19,-145 -12,-184 0,-240 12,-184 19,-145 42,-105 12,-86 12,-78 12,-48 z"
+			style="fill:#b90000;stroke:#600;stroke-width:1;stroke-linejoin:round" />
+		<path d="M 0,-191.53125 C -8.5673788,-128.90942 -13,-64.97451 -13,0 -13,64.97451 -8.5673788,128.90942 0,191.53125 8.5673788,128.90942 13,64.97451 13,0 13,-64.97451 8.5673788,-128.90942 0,-191.53125 z"
+			style="fill:#e00000;stroke:#a00;stroke-linejoin:round" />
+	</g>
+	<use xlink:href="#Spearheads2" transform="matrix(0,1,-1,0,0,0)" />
+	<circle cx="0" cy="0" r="52"
+		style="fill:#e00000;stroke:#a00;stroke-width:2" />
+</svg>

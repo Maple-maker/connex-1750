@@ -1,75 +1,137 @@
-# master-1750-tool
+# CONNEX 1750 — Packing List Generator
 
-A small Flask web tool that turns a **batch of child DD Form 1750 PDFs** into a
-single rendered **Master DD Form 1750 packing list**.
+Turn a stack of BOM PDFs into sealed, stamped DD Form 1750s with a commander-ready SITREP. The operator picks a unit profile, packs equipment into boxes on a 2D split-screen, seals the connex through a read-only 3D review, and downloads a ZIP containing the master and per-box DD1750 PDFs plus a PDF SITREP.
 
-You drop the child 1750s, the tool reads each **filename** to identify the Major
-End Item (Model / LIN / Serial), aggregates identical equipment into one box row
-(qty = count, all serials listed), you fill the header once, and it generates the
-master packing list PDF. A built-in auditor validates the result.
+The legacy 2D flat-file workflow (batch child-1750 → master 1750) is preserved and accessible from the collapsible "Legacy" section on the main page.
 
-## What it does
+---
 
-1. **Upload** — drag/drop or browse a batch of child 1750 PDFs.
-2. **Parse** — each filename is classified by token *shape* (order-independent)
-   into Model / LIN / Serial / Bumper. The NSN is best-effort sniffed from the
-   child PDF body when present.
-3. **Aggregate** — identical `(LIN, Model)` collapse into one box: `qty = count`,
-   serials listed comma-separated.
-4. **Review** — edit any cell in the table; rows missing a LIN/Model are
-   highlighted for review. Add/remove rows; box numbers re-sequence 1..N.
-5. **Generate** — renders the master DD1750 (two-line rows, paginated at 18
-   rows/page, `NOTHING FOLLOWS` marker) onto the official blank template.
-6. **Audit** — checks box numbering, required fields, Packer ≠ Signer, serial
-   presence, and qty/serial consistency; reports ERRORs and WARNINGs.
+## Stack
 
-## Run locally
+| Layer | Technology |
+|-------|-----------|
+| Backend | Flask 3.0, Python 3.11, gunicorn |
+| Persistence | JSON files on disk (`data/profiles/`, `data/connexes/`) |
+| PDF render | reportlab, pypdf, pdfplumber |
+| Frontend | Vanilla JS ES modules, no framework, no build step |
+| 3D scene | three.js r160+ via CDN importmap — read-only sealed review at Step 5 only |
+| Deploy | Railway (Procfile + railway.json + runtime.txt) |
+
+---
+
+## Quickstart
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-python app.py
+python3 app.py
 ```
 
-Then open **http://localhost:8000**.
+Open **http://localhost:8000**.
 
-(Set `PORT=8055` before `python app.py` to use a different port.)
+`PORT` env var overrides the port (e.g. `PORT=9000 python3 app.py`).
 
-## Deploy (Railway)
+---
 
-Standard NIXPACKS build. `Procfile` starts gunicorn bound to `$PORT`; the
-health check path is **`/api/health`**. `runtime.txt` pins Python 3.11.
+## 6-step operator workflow
 
-## Filename parser logic
+```
+1. PROFILE        Pick brigade from the insignia gallery (97 formations, searchable;
+                  lazy-loaded). Profile saves unit identity and pre-fills header fields.
+2. CONNEX SETUP   Name the connex + set box count. 2D only — no 3D here.
+3. PACKING        2D split-screen:
+                    Left  = BOM pool (ingest BOM PDFs) + Add Individual Item form
+                    Right = box cards, each with inline SLOC + SHRH POC + status badge
+                  Drag a BOM card onto a box OR click-select BOM then click a box.
+                  Individual items are added directly to a box here (no separate step).
+4. SEAL DATA      Enter SUN #, CONNEX #, SEAL # (all optional → [.. PENDING] placeholders),
+                  packed-by, signed-by (must differ from packer).
+5. REVIEW & SEAL  Read-only 3D view of the sealed connex (color-coded boxes) + per-box
+                  checklist. Confirm each box, then "Apply Brigade Stamp & Seal" →
+                  connex doors close with the battalion stamp → download ZIP:
+                    Master_1750.pdf  (all boxes condensed)
+                    Box_001.pdf ...  (one per occupied box)
+6. NEXT / SITREP  Pack another connex under the same profile, or finish and generate
+                  the commander's SITREP (JSON + PDF) across all connexes.
+```
 
-The parser is **shape-based and order-independent** — the *shape* of each token,
-not its position, decides what it is:
+---
 
-1. **Normalize** — strip `.pdf`; strip `DD1750` / `1750` form stamps even when
-   glued by `_` or `.` (e.g. `M249_DD1750`, `DD1750.T92889`); convert `_`/`.` to
-   spaces; collapse whitespace.
-2. **Explicit serial marker** (highest priority) — `SN_xxxx`, `SN: xxxx`,
-   `SN_ xxxx` (space after underscore), or even `2SN_xxxx` glued to a model
-   fragment → that value is the serial.
-3. **Bumper** — `^B\d{1,3}[A-Z]?$` (B33, B5, B34S).
-4. **LIN** — `^[A-Z]\d{5}$` (T88915, E05003, A22496); first match wins, and any
-   later LIN-shaped duplicate is consumed so it never leaks into the model.
-5. **Serial (by shape)** — pure-numeric ≥3 digits, hyphenated registration
-   (`J-K1234567-AB`), or mixed alphanumeric ≥7 chars (`1ABCD2345678`,
-   `A0012345`, `W0009999`).
-6. **Model** — everything left, joined in original order. Model-number fragments
-   like `M983A4`, `M1113`, `M249`, `AN/PAS-13D` correctly fall through here
-   (they don't match the strict LIN/serial shapes).
+## Architecture map
 
-`needs_review = True` whenever the LIN or Model is missing, so the UI flags it for
-a human fix. The editable table is the safety net — the parser is never silently
-wrong.
+```
+app.py                  Flask entrypoint — all routes (legacy + new /api/* layer)
+  │
+  ├── profiles.py         Load/save/list/upsert Profile JSON (data/profiles/)
+  ├── connex_store.py     CRUD + seal validation for Connex JSON (data/connexes/)
+  ├── sitrep.py           Build SITREP JSON model (Contract C)
+  │
+  ├── render_core.py      DD1750 PDF renderer — header, pagination, battalion stamp
+  ├── sitrep_render.py    Commander SITREP PDF (ReportLab)
+  ├── master_core.py      Filename parser, aggregator, BOM → row conversion
+  ├── bom_ingest.py       Multi-format BOM PDF extraction
+  ├── packing.py          Box-assignment engine, zero-on-hand handling
+  ├── reconcile.py        SHR reconciliation
+  │
+  ├── templates/
+  │   └── index.html      Single-page app shell — three.js importmap, .cx-layout
+  │
+  └── static/
+      ├── app.js          6-step workflow state machine (ES module)
+      ├── glossary.js     GLOSSARY object + buildHelpPopover() helper
+      ├── tokens.css      Design system CSS custom properties (Contract E)
+      ├── style.css       Component library — glassmorphism, badges, stepper
+      ├── _styleguide.html  Visual QA harness (open in browser, no server needed)
+      ├── connex3d.js     three.js connex scene module (Contract D) — Step 5 read-only
+      ├── connex3d/
+      │   └── _harness.html   Isolated 3D dev/QA harness
+      └── formations/
+          ├── manifest.json   97-entry brigade insignia index
+          └── *.svg/*.jpg     Brigade insignia assets (downscaled for constrained
+                              networks; lazy-loaded in gallery)
 
-## Files
+data/
+  ├── profiles/           Profile JSON files (gitignored at runtime; .gitkeep committed)
+  └── connexes/           Connex JSON files (gitignored at runtime; .gitkeep committed)
+```
 
-- `app.py` — Flask routes (`/`, `/upload`, `/generate`, `/audit`, `/api/health`).
-- `master_core.py` — filename parser, NSN sniffer, aggregator, header builder, auditor.
-- `render_core.py` — PDF render/merge/pagination, adapted from the proven v25 renderer.
-- `blank_1750.pdf` — the flattened official DD1750 render template.
-- `templates/index.html` — single-page UI (inlined CSS + JS).
+---
+
+## API routes
+
+All new routes are under `/api/`. Existing legacy routes (`/ingest`, `/assign`, `/regroup`, `/generate-master`, `/generate-individuals`, `/reconcile`, `/audit`, `/api/health`) are unchanged.
+
+See `docs/DEPLOYMENT.md` for the full route table and `docs/handoff/backend.md` for request/response shapes.
+
+---
+
+## Environment variables
+
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `PORT` | no | `8000` | HTTP listen port |
+| `OPENROUTER_API_KEY` | no | — | Fast-follow AI item helper (owl-alpha); not wired in MVP |
+
+---
+
+## Tests
+
+```bash
+# Full test suite (existing + new)
+python3 -m pytest test_packing.py test_grouping.py test_reconcile.py \
+                  test_zero_on_hand.py test_bom_ingest.py test_shr_ingest.py \
+                  test_profiles.py test_connex.py test_sitrep.py -v
+```
+
+All 73 legacy packing tests plus the 59 new profile/connex/sitrep tests must pass.
+
+---
+
+## Key design decisions
+
+- **No build step.** three.js loads from CDN via ES-module importmap in `index.html`. No webpack, vite, or node required.
+- **3D is read-only at Step 5 only.** Packing (Step 3) is a 2D split-screen — the primary workflow path requires no WebGL. The 3D scene is used only for the sealed-connex visual review at Step 5. If WebGL is unavailable, Step 5 shows the per-box checklist without the 3D view.
+- **Single gunicorn worker.** In-memory `JOBS` dict holds BOM ingest state. If the process restarts, BOM ingest must be re-run. This is intentional for a single-user tool.
+- **JSON persistence.** Human-readable, no migrations, fits the Railway deploy model. `data/` is gitignored at the file level; only `.gitkeep` markers are committed.
+- **AI helper deferred.** The owl-alpha NSN/LIN suggestion helper is planned as a fast-follow. A stub route exists (`/api/ai/suggest-item`) and a hook is present in the PACKING step's individual item form. It is not wired in the current MVP.

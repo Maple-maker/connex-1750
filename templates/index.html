@@ -3,9 +3,537 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Master DD1750 Packing List Generator</title>
+<title>CONNEX 1750 — Packing List Generator</title>
+
+<!-- ============================================================
+     CONTRACT E — Design system tokens (owned by UI Design agent).
+     Do NOT add inline CSS that overrides these tokens.
+     ============================================================ -->
+<link rel="stylesheet" href="/static/tokens.css">
+<link rel="stylesheet" href="/static/style.css">
+
+<!-- ============================================================
+     Decision #1 (locked): no build step.
+     three.js r160+ loaded via ES module importmap from CDN.
+     The 3D agent's connex3d.js imports 'three' by this bare specifier.
+     OrbitControls are included so connex3d.js can use them without a path.
+     ============================================================ -->
+<script type="importmap">
+{
+  "imports": {
+    "three":                      "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/":              "https://unpkg.com/three@0.160.0/examples/jsm/",
+    "three/examples/jsm/controls/OrbitControls.js":
+                                  "https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js"
+  }
+}
+</script>
+
+<!-- Shell styles — scoped to the new cx-layout shell.
+     Legacy packing-list sections keep their own styles in the legacy block below.
+     3D canvas is mounted dynamically by REVIEW_SEAL step only — not present at load. -->
 <style>
-  :root {
+  /* Step error banner */
+  #step-error {
+    display: none;
+    padding: var(--space-2) var(--space-4);
+    background: rgba(229, 103, 90, 0.12);
+    border: 1px solid var(--connex-danger);
+    border-radius: var(--radius-sm);
+    color: var(--connex-danger);
+    font-size: var(--text-sm);
+    margin: 0 0 var(--space-3);
+  }
+
+  /* Popover open state — toggled by toggleHelp() in app.js */
+  .cx-help__popover--open {
+    display: block !important;
+  }
+
+  /* Rail scroll */
+  .cx-rail-left,
+  .cx-rail-right {
+    overflow-y: auto;
+    max-height: 100vh;
+  }
+
+  /* 3D canvas — injected into #cx-3d-mount by REVIEW_SEAL step */
+  #cx-3d-mount canvas {
+    width: 100%;
+    min-height: 380px;
+    display: block;
+    border-radius: var(--radius-md);
+  }
+
+  /* Packing split-screen — two equal panes */
+  #packing-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-4);
+    align-items: start;
+  }
+  @media (max-width: 900px) {
+    #packing-split { grid-template-columns: 1fr; }
+  }
+
+  /* BOM pool card selected state (click-to-assign) */
+  .cx-bom-card--selected {
+    outline: 2px solid var(--connex-gold);
+    outline-offset: 2px;
+  }
+
+  /* Box drop-target highlight during drag */
+  .box-card--drag-over {
+    outline: 2px solid var(--connex-ok);
+    background: rgba(111,207,151,0.08);
+  }
+
+  /* Legacy wrap */
+  #legacy-wrap { padding-top: var(--space-4); }
+
+  /* ── Tutorial overlay ─────────────────────────────────────── */
+
+  /* Backdrop dim */
+  #cx-tutorial-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.72);
+    z-index: 900;
+    /* Fade in */
+    animation: tutFadeIn 0.18s ease;
+  }
+  #cx-tutorial-backdrop.cx-tutorial--open { display: flex; align-items: center; justify-content: center; }
+  @keyframes tutFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  /* Glass card */
+  #cx-tutorial-modal {
+    position: relative;
+    width: min(560px, 94vw);
+    max-height: min(640px, 90vh);
+    overflow-y: auto;
+    background: rgba(22, 25, 35, 0.88);
+    border: 1px solid rgba(212, 175, 55, 0.25);
+    border-radius: var(--radius-lg, 12px);
+    box-shadow: 0 24px 80px rgba(0,0,0,0.7);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    padding: var(--space-6, 32px) var(--space-6, 32px) var(--space-5, 24px);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4, 16px);
+  }
+
+  /* Close × in corner */
+  #cx-tutorial-close {
+    position: absolute;
+    top: var(--space-3, 12px);
+    right: var(--space-4, 16px);
+    background: none;
+    border: none;
+    color: var(--connex-gray, #8892a4);
+    font-size: 1.3rem;
+    cursor: pointer;
+    line-height: 1;
+    padding: 4px 6px;
+    border-radius: 4px;
+    transition: color 0.15s;
+  }
+  #cx-tutorial-close:hover { color: var(--connex-gold, #d4af37); }
+
+  /* Step badge above heading */
+  .cx-tut__step-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--connex-gold, #d4af37);
+    background: rgba(212,175,55,0.12);
+    border: 1px solid rgba(212,175,55,0.25);
+    border-radius: 20px;
+    padding: 2px 10px;
+    margin-bottom: var(--space-2, 8px);
+  }
+
+  /* Slide heading */
+  .cx-tut__heading {
+    font-size: var(--text-lg, 1.15rem);
+    font-weight: 700;
+    color: #fff;
+    margin: 0 0 var(--space-2, 8px);
+  }
+
+  /* Slide body text */
+  .cx-tut__body {
+    font-size: var(--text-sm, 0.875rem);
+    color: var(--connex-light, #c5cad8);
+    line-height: 1.65;
+    margin: 0;
+  }
+
+  /* Dot indicators */
+  #cx-tutorial-dots {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    margin-top: var(--space-2, 8px);
+  }
+  .cx-tut__dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.2);
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.2s;
+  }
+  .cx-tut__dot--active { background: var(--connex-gold, #d4af37); }
+
+  /* Nav row */
+  #cx-tutorial-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3, 12px);
+    margin-top: var(--space-2, 8px);
+  }
+  #cx-tutorial-skip {
+    background: none;
+    border: none;
+    color: var(--connex-gray, #8892a4);
+    font-size: var(--text-sm, 0.875rem);
+    cursor: pointer;
+    padding: 0;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  #cx-tutorial-skip:hover { color: var(--connex-light, #c5cad8); }
+
+  /* Header tutorial button */
+  #cx-tutorial-reopen {
+    margin-left: auto;
+    background: rgba(212,175,55,0.12);
+    border: 1px solid rgba(212,175,55,0.3);
+    color: var(--connex-gold, #d4af37);
+    border-radius: var(--radius-sm, 6px);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s;
+    align-self: center;
+  }
+  #cx-tutorial-reopen:hover { background: rgba(212,175,55,0.22); }
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     TOP — Unit banner (driven by app.js: renderBanner())
+     ============================================================ -->
+<header class="cx-banner" id="cx-banner" style="padding: var(--space-3) var(--space-6);">
+  <!-- renderBanner() populates this -->
+  <span class="cx-banner__emblem">&#x1F4E6;</span>
+  <span class="cx-banner__body">
+    <span class="cx-banner__unit">CONNEX 1750</span>
+    <span class="cx-banner__sub">Loading…</span>
+  </span>
+  <!-- Tutorial reopen button — always visible in header -->
+  <button id="cx-tutorial-reopen" onclick="openTutorial()" aria-label="How it works tutorial">
+    &#9654; How it works
+  </button>
+</header>
+
+<!-- ============================================================
+     TUTORIAL OVERLAY — shown on first load; reopenable via header.
+     Managed entirely by tutorialInit() / openTutorial() in app.js.
+     ============================================================ -->
+<div id="cx-tutorial-backdrop" role="dialog" aria-modal="true" aria-label="App tutorial"
+     onclick="handleTutorialBackdropClick(event)">
+  <div id="cx-tutorial-modal">
+    <button id="cx-tutorial-close" onclick="closeTutorial()" aria-label="Close tutorial">&times;</button>
+
+    <!-- Slide content — injected by renderTutorialSlide() -->
+    <div id="cx-tutorial-slide" style="flex:1;"></div>
+
+    <!-- Dot indicators -->
+    <div id="cx-tutorial-dots" aria-hidden="true"></div>
+
+    <!-- Navigation -->
+    <div id="cx-tutorial-nav">
+      <button id="cx-tutorial-skip" onclick="closeTutorial()">Skip</button>
+      <div style="display:flex;gap:var(--space-2,8px);">
+        <button class="cx-btn cx-btn--ghost cx-btn--sm" id="cx-tutorial-back"
+                onclick="tutorialBack()" style="display:none;">&#8592; Back</button>
+        <button class="cx-btn cx-btn--primary cx-btn--sm" id="cx-tutorial-next"
+                onclick="tutorialNext()">Next &#8594;</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     MAIN — 3-column layout (.cx-layout per Contract E)
+     Left: stepper  |  Center: 3D + step content  |  Right: detail
+     ============================================================ -->
+<main class="cx-layout">
+
+  <!-- ── LEFT RAIL — stepper ── -->
+  <aside class="cx-rail-left">
+    <ol class="cx-stepper" id="cx-stepper">
+      <!-- renderStepper() populates this -->
+    </ol>
+  </aside>
+
+  <!-- ── CENTER — step content (3D canvas injected dynamically only in REVIEW_SEAL) ── -->
+  <div class="cx-center">
+
+    <!-- Global step-transition error (guard failures) -->
+    <div id="step-error" role="alert"></div>
+
+    <!-- Step-specific content panel — app.js renders each step here.
+         The 3D canvas is NOT present at load; REVIEW_SEAL injects a
+         #cx-3d-mount div + canvas dynamically, then disposes it on exit. -->
+    <div id="cx-step-content">
+      <!-- renderStepPanel() targets this element -->
+    </div>
+
+  </div><!-- /.cx-center -->
+
+  <!-- ── RIGHT RAIL — context panel (box detail / tips) ── -->
+  <aside class="cx-rail-right">
+    <div id="cx-right-rail-content">
+      <!-- renderStepPanel() also updates this -->
+    </div>
+  </aside>
+
+</main><!-- /.cx-layout -->
+
+<!-- ============================================================
+     LEGACY TOOLS (collapsed) — the existing 2D packing flow.
+     All legacy routes (/ingest, /assign, /regroup, /generate-master,
+     /generate-individuals, /audit) remain fully functional here.
+     This section is intentionally preserved and NOT removed —
+     no regressions allowed (01_MVP_BUILD_GUIDE.md §9).
+     ============================================================ -->
+<div id="legacy-wrap">
+<details>
+  <summary style="cursor:pointer;padding:var(--space-3) var(--space-6);background:var(--connex-panel);color:var(--connex-gray);font-size:var(--text-sm);">
+    &#9656; Legacy 2D Packing Flow (existing tool — preserved)
+  </summary>
+  <div style="padding: var(--space-4) var(--space-6);">
+
+    <!-- ======================================================= -->
+    <!-- LEGACY SECTION 1: FILE DROP ZONE                        -->
+    <!-- ======================================================= -->
+    <div class="card">
+      <h2>1 &middot; Upload Source Files</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:12px;">
+        <div>
+          <div style="font-size:0.8rem;font-weight:600;color:#4a5568;margin-bottom:6px;">Sub Hand Receipt (optional)</div>
+          <div class="file-zone" id="shrZone">
+            <label for="shrInput">
+              <strong>Drop SHR PDF here</strong> or click to browse
+              <div class="muted">Single .pdf — used for reconciliation / SHR consistency checks.</div>
+              <input type="file" id="shrInput" accept="application/pdf">
+            </label>
+          </div>
+          <div id="shrFileLabel" class="muted" style="min-height:1.2em;"></div>
+        </div>
+        <div>
+          <div style="font-size:0.8rem;font-weight:600;color:#4a5568;margin-bottom:6px;">BOM PDFs</div>
+          <div class="file-zone" id="bomZone">
+            <label for="bomInput">
+              <strong>Drop BOM PDFs here</strong> or click to browse
+              <div class="muted">Multiple files OK — one BOM PDF per end item.</div>
+              <input type="file" id="bomInput" accept="application/pdf" multiple>
+            </label>
+          </div>
+          <div id="bomFileLabel" class="muted" style="min-height:1.2em;"></div>
+        </div>
+      </div>
+      <div class="ingest-row">
+        <button class="btn-primary" id="ingestBtn" onclick="legacyDoIngest()">Ingest &rarr; Extract</button>
+        <span id="ingestStatus"></span>
+      </div>
+    </div>
+
+    <!-- ======================================================= -->
+    <!-- LEGACY SECTION 2: REVIEW TABLE                          -->
+    <!-- ======================================================= -->
+    <div class="card" id="reviewSection" style="display:none;">
+      <h2>2 &middot; Review &amp; Assign Boxes</h2>
+      <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+        <div class="boxes-bar" id="boxesBar">Boxes in use: —</div>
+        <button class="btn-ghost btn-sm" id="autoAssignBtn" onclick="legacyAutoAssign()">Auto-assign 1..N</button>
+        <button class="btn-ghost btn-sm" id="condenseDupBtn" onclick="legacyCondenseDuplicates()">Re-group like items (recount 1..N)</button>
+        <span id="condenseDupStatus" class="muted" style="font-size:0.8rem;"></span>
+      </div>
+      <div class="recon-summary" id="reconSummary" style="display:none;"></div>
+      <table id="reviewTable">
+        <thead>
+          <tr>
+            <th class="col-exp"></th>
+            <th class="col-box">Box #</th>
+            <th>File</th>
+            <th>Nomenclature</th>
+            <th>Model</th>
+            <th class="col-lin">LIN</th>
+            <th class="col-niin">NIIN</th>
+            <th class="col-serial">Serial</th>
+            <th class="col-items">Items</th>
+            <th class="col-shr">SHR</th>
+          </tr>
+        </thead>
+        <tbody id="reviewBody"></tbody>
+      </table>
+    </div>
+
+    <!-- ======================================================= -->
+    <!-- LEGACY SECTION 3: HEADER FORM                           -->
+    <!-- ======================================================= -->
+    <div class="card" id="headerSection" style="display:none;">
+      <h2>3 &middot; Header Information</h2>
+      <div class="grid">
+        <div class="field"><label>Packed By — RANK, LAST, FIRST</label><input id="h_packed_by" placeholder="SSG MORRIS, JOHN"></div>
+        <div class="field"><label>UIC</label><input id="h_uic" placeholder="WABCD0"></div>
+        <div class="field"><label>Battery</label><input id="h_battery" placeholder="B BTY"></div>
+        <div class="field"><label>Battalion</label><input id="h_battalion" placeholder="2-55 ADA"></div>
+        <div class="field"><label>SHRH POC</label><input id="h_shrh" placeholder="CPT JONES"></div>
+        <div class="field"><label>SLOC / Section</label><input id="h_sloc" placeholder="BLDG-100 / SEC"></div>
+        <div class="field"><label>Container #</label><input id="h_container" placeholder="CONEX-01"></div>
+        <div class="field"><label>SUN #</label><input id="h_sun" placeholder="SUN-2026-001"></div>
+        <div class="field"><label>SEAL #</label><input id="h_seal" placeholder="SEAL-4455"></div>
+        <div class="field"><label>Date</label><input id="h_date" placeholder="15 JUN 2026"></div>
+        <div class="field" style="grid-column:1/-1;">
+          <label>Signer Name / Title</label>
+          <input id="h_signer_name" placeholder="1LT BAKER, SAM">
+          <span class="hint">Must differ from Packed By.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======================================================= -->
+    <!-- LEGACY SECTION 4: GENERATE                              -->
+    <!-- ======================================================= -->
+    <div class="card" id="generateSection" style="display:none;">
+      <h2>4 &middot; Generate Documents</h2>
+      <div id="genReconSummary" class="recon-summary" style="margin-bottom:10px;"></div>
+      <div class="actions" style="flex-wrap:wrap;gap:12px;">
+        <button class="btn-success" id="genIndividualsBtn" onclick="legacyGenerateIndividuals()">Download Individual 1750s (ZIP)</button>
+        <button class="btn-primary"  id="genMasterBtn"      onclick="legacyGenerateMaster()">Download Master 1750 (PDF)</button>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem;font-weight:600;color:#4a5568;cursor:pointer;">
+          <input type="checkbox" id="condenseChk" checked style="width:15px;height:15px;cursor:pointer;">
+          Condense duplicate items
+        </label>
+      </div>
+      <div id="genStatus" class="muted" style="margin-top:8px;"></div>
+    </div>
+
+    <!-- ======================================================= -->
+    <!-- LEGACY TOOLS (individual 1750 PDFs / SHR CSV)           -->
+    <!-- ======================================================= -->
+    <details>
+      <summary>&#9656; Legacy tools (individual 1750 PDFs / SHR CSV)</summary>
+      <div class="inner-wrap">
+        <div class="card" style="margin-top:12px;">
+          <h2>Upload Source</h2>
+          <div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid var(--border);">
+            <button id="tabPdf" class="tab-btn tab-active" onclick="legacySwitchTab('pdf')">Individual 1750 PDFs</button>
+            <button id="tabCsv" class="tab-btn"            onclick="legacySwitchTab('csv')">SHR Extract CSV</button>
+          </div>
+          <div id="panelPdf">
+            <div id="dropzone">
+              <p><strong>Drag &amp; drop</strong> individual 1750 PDFs here, or <strong>click to browse</strong>.</p>
+              <p class="muted">Filenames are parsed for Model / LIN / Serial. Multiple files OK.</p>
+              <input type="file" id="fileInput" accept="application/pdf" multiple style="display:none;">
+            </div>
+            <div id="uploadStatus"></div>
+          </div>
+          <div id="panelCsv" style="display:none;">
+            <div id="csvDropzone" style="border:2px dashed var(--accent);border-radius:10px;padding:38px 16px;text-align:center;color:#4a5568;cursor:pointer;background:#f0f6ff;">
+              <p><strong>Drag &amp; drop</strong> the SHR extract CSV here, or <strong>click to browse</strong>.</p>
+              <p class="muted">Export from the SHR Extractor tool first, then upload here.</p>
+              <input type="file" id="csvInput" accept=".csv" style="display:none;">
+            </div>
+            <div id="csvStatus"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Header Information (Legacy)</h2>
+          <div class="grid">
+            <div class="field"><label>UIC</label><input id="l_uic" placeholder="WABCD0"></div>
+            <div class="field"><label>Battery</label><input id="l_battery" placeholder="B BTY"></div>
+            <div class="field"><label>Battalion</label><input id="l_battalion" placeholder="1-1 ADA"></div>
+            <div class="field"><label>Packed By (RANK LAST, FIRST)</label><input id="l_packed_by" placeholder="SSG SMITH, JOHN"></div>
+            <div class="field"><label>SHRH POC</label><input id="l_shrh" placeholder="CPT JONES"></div>
+            <div class="field"><label>SLOC / Section</label><input id="l_sloc" placeholder="BLDG-100 / SEC"></div>
+            <div class="field"><label>Container #</label><input id="l_container" placeholder="CONEX-01"></div>
+            <div class="field"><label>SUN #</label><input id="l_sun" placeholder="SUN-2026-001"></div>
+            <div class="field"><label>SEAL #</label><input id="l_seal" placeholder="SEAL-4455"></div>
+            <div class="field"><label>Date</label><input id="l_date" placeholder="15 JUN 2026"></div>
+            <div class="field">
+              <label>Signer Name / Title</label>
+              <input id="l_signer_name" placeholder="1LT BAKER, SAM">
+              <span class="hint">Must differ from Packed By.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Review &amp; Edit Rows (Legacy)</h2>
+          <table id="rowsTable">
+            <thead>
+              <tr>
+                <th class="col-box">Box #</th>
+                <th>Model / Nomenclature</th>
+                <th>LIN</th>
+                <th>NSN</th>
+                <th>Serials (comma-separated)</th>
+                <th class="col-items">Qty</th>
+                <th style="width:70px;text-align:center;"></th>
+              </tr>
+            </thead>
+            <tbody id="rowsBody"></tbody>
+          </table>
+          <div class="btn-row">
+            <button class="btn-ghost" id="addRowBtn">+ Add Row</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Generate / Audit (Legacy)</h2>
+          <div class="actions">
+            <button class="btn-success" id="generateBtn">Generate Master 1750 (PDF)</button>
+            <button class="btn-primary"  id="auditBtn">Run Audit</button>
+          </div>
+        </div>
+
+        <div class="card" id="auditPanel" style="display:none;">
+          <h2>Audit Results</h2>
+          <div id="auditStatus"></div>
+          <ul class="issues" id="auditIssues"></ul>
+        </div>
+      </div><!-- /inner-wrap -->
+    </details>
+
+  </div><!-- /legacy body -->
+</details>
+</div><!-- /#legacy-wrap -->
+
+<!-- ============================================================
+     LEGACY STYLES — kept intact so existing routes render correctly.
+     These only apply inside #legacy-wrap.
+     ============================================================ -->
+<style>
+  /* Scope all legacy styles inside the collapse so they don't bleed
+     into the new .cx-* components. */
+  #legacy-wrap :root,
+  #legacy-wrap {
     --primary: #1a365d;
     --accent:  #3182ce;
     --success: #38a169;
@@ -15,1334 +543,554 @@
     --card:    #fff;
     --border:  #e2e8f0;
   }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background: var(--bg);
-    color: #1a202c;
-  }
-  header.appbar {
-    background: var(--primary);
-    color: #fff;
-    padding: 18px 24px;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.12);
-  }
-  header.appbar h1 { margin: 0; font-size: 1.35rem; font-weight: 600; }
-  header.appbar p  { margin: 4px 0 0; font-size: 0.85rem; opacity: 0.85; }
-  .wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }
-  .card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 20px;
-    margin-bottom: 20px;
+  /* Card */
+  #legacy-wrap .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 20px; margin-bottom: 20px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.05);
   }
-  .card h2 {
-    margin: 0 0 14px;
-    font-size: 1.05rem;
-    color: var(--primary);
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 8px;
+  #legacy-wrap .card h2 {
+    margin: 0 0 14px; font-size: 1.05rem; color: var(--primary);
+    border-bottom: 1px solid var(--border); padding-bottom: 8px;
   }
-
-  /* ---- File inputs / drop zone ---- */
-  .file-zone {
-    border: 2px dashed var(--accent);
-    border-radius: 8px;
-    padding: 22px 16px;
-    text-align: center;
-    color: #4a5568;
-    cursor: pointer;
-    transition: background .15s, border-color .15s;
-    background: #f0f6ff;
-    margin-bottom: 10px;
+  /* File zones */
+  #legacy-wrap .file-zone {
+    border: 2px dashed var(--accent); border-radius: 8px; padding: 22px 16px;
+    text-align: center; color: #4a5568; cursor: pointer;
+    transition: background .15s, border-color .15s; background: #f0f6ff; margin-bottom: 10px;
   }
-  .file-zone:hover { background: #dbeafe; }
-  .file-zone strong { color: var(--primary); }
-  .file-zone label { cursor: pointer; display: block; }
-  .file-zone input[type="file"] { display: none; }
-  .file-zone .muted { margin: 4px 0 0; font-size: 0.8rem; color: #718096; }
-  .ingest-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
-  #ingestStatus { font-size: 0.85rem; color: #4a5568; }
-
-  /* ---- Header form ---- */
-  .grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px 18px;
-  }
-  .field { display: flex; flex-direction: column; }
-  .field label { font-size: 0.78rem; font-weight: 600; color: #4a5568; margin-bottom: 4px; }
-  .field input {
-    padding: 8px 10px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 0.9rem;
-  }
-  .field input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(49,130,206,0.18); }
-  .hint { font-size: 0.72rem; color: var(--warning); margin-top: 3px; }
-
-  /* ---- Review table ---- */
-  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-  th, td { border: 1px solid var(--border); padding: 6px 8px; text-align: left; vertical-align: middle; }
-  th { background: #edf2f7; color: var(--primary); font-weight: 600; white-space: nowrap; }
-  td input[type="number"] {
-    width: 56px; border: 1px solid var(--border); background: #f7fafc;
-    font-size: 0.85rem; padding: 4px 5px; text-align: center; border-radius: 4px;
-  }
-  td input[type="number"]:focus { outline: none; border-color: var(--accent); background: #fff; }
-  td.col-box   { width: 68px; text-align: center; }
-  td.col-shr   { width: 52px; text-align: center; }
-  td.col-exp   { width: 36px; text-align: center; }
-  td.col-items { width: 52px; text-align: center; }
-  td.col-lin   { width: 70px; font-family: monospace; }
-  td.col-niin  { width: 90px; font-family: monospace; }
-  td.col-serial{ font-family: monospace; }
-
-  .shr-match   { color: var(--success); font-weight: 700; font-size: 1rem; }
-  .shr-warn    { color: var(--warning); font-weight: 700; font-size: 1rem; cursor: pointer; text-decoration: underline dotted; }
-  .shr-none    { color: #a0aec0; }
-
-  /* Expander row */
-  .expander-btn {
-    background: none; border: none; font-size: 1rem; cursor: pointer;
-    color: var(--accent); padding: 2px 4px; border-radius: 4px;
-  }
-  .expander-btn:hover { background: #edf2f7; filter: none; }
-
-  /* Sub-table for items */
-  tr.items-row td { background: #f7fafc; padding: 10px 14px; }
-  tr.items-row table { font-size: 0.8rem; margin: 0; }
-  tr.items-row th  { background: #e2e8f0; font-size: 0.78rem; }
-
-  /* Mismatch detail panel */
-  tr.detail-row td { background: #fffbea; padding: 10px 14px; }
-
-  /* Zero-on-hand end items: flagged for review, excludable before generating */
-  tr.zoh-row td { background: #fffaf0; }
-  tr.row-excluded td { opacity: 0.45; text-decoration: line-through; }
-  .badge-zoh { background: #feebc8; color: #744210; }
-  .badge-grp { background: #c3dafe; color: #2a4365; }
-  .btn-xs { display:inline-block; font-size: 0.66rem; padding: 2px 6px; margin-top: 4px;
-            cursor: pointer; border: 1px solid #cbd5e0; border-radius: 4px;
-            background: #edf2f7; color: var(--primary); }
-  .btn-xs:hover { background: #e2e8f0; }
-  .detail-panel { font-size: 0.82rem; }
-  .detail-panel ul { margin: 6px 0 0; padding-left: 18px; }
-  .detail-panel li { margin-bottom: 3px; }
-  .detail-field-table { border-collapse: collapse; font-size: 0.8rem; margin-top: 8px; }
-  .detail-field-table th, .detail-field-table td {
-    border: 1px solid var(--border); padding: 4px 8px; text-align: left;
-  }
-  .detail-field-table th { background: #edf2f7; }
-  .field-ok   { color: var(--success); }
-  .field-diff { color: var(--danger);  }
-
-  /* Boxes in use bar */
-  .boxes-bar {
-    font-size: 0.82rem; color: #2d3748; background: #edf2f7;
-    border-radius: 6px; padding: 6px 12px; display: inline-block; margin-bottom: 10px;
-  }
-  .boxes-bar strong { color: var(--primary); }
-
-  /* Reconcile summary */
-  .recon-summary {
-    font-size: 0.82rem; color: #4a5568; margin-bottom: 14px;
-  }
-  .recon-summary .badge {
-    display: inline-block; font-size: 0.7rem; font-weight: 700;
-    padding: 2px 7px; border-radius: 4px; margin-left: 6px;
-  }
-  .badge-clean   { background: #c6f6d5; color: #22543d; }
-  .badge-flagged { background: #feebc8; color: #744210; }
-
-  /* Buttons */
-  button {
-    font-size: 0.9rem; font-weight: 600; border: none; border-radius: 7px;
-    padding: 9px 16px; cursor: pointer; transition: filter .15s;
-  }
-  button:hover { filter: brightness(0.94); }
-  button:disabled { opacity: 0.5; cursor: not-allowed; filter: none; }
-  .btn-primary { background: var(--accent);   color: #fff; }
-  .btn-success { background: var(--success);  color: #fff; }
-  .btn-ghost   { background: #edf2f7;         color: var(--primary); }
-  .btn-danger  { background: var(--danger);   color: #fff; padding: 5px 10px; font-size: 0.78rem; }
-  .btn-sm      { padding: 5px 10px; font-size: 0.78rem; }
-  .btn-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
-  .actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-
-  .muted { color: #718096; font-size: 0.8rem; }
-
-  /* Audit / legacy audit panel */
-  #auditPanel { display: none; }
-  .audit-status {
-    font-weight: 700; padding: 8px 12px; border-radius: 6px; display: inline-block; margin-bottom: 10px;
-  }
-  .audit-pass { background: #c6f6d5; color: #22543d; }
-  .audit-fail { background: #fed7d7; color: #742a2a; }
-  ul.issues { list-style: none; padding: 0; margin: 0; }
-  ul.issues li { padding: 7px 10px; border-radius: 5px; margin-bottom: 6px; font-size: 0.85rem; }
-  li.sev-ERROR   { background: #fff5f5; border-left: 4px solid var(--danger);  color: var(--danger); }
-  li.sev-WARNING { background: #fffaf0; border-left: 4px solid var(--warning); color: #975a16; }
-  .badge-ERROR   { background: var(--danger);  color: #fff; }
-  .badge-WARNING { background: var(--warning); color: #fff; }
-  .badge { display:inline-block; font-size:0.7rem; font-weight:700; padding:1px 6px; border-radius:4px; margin-right:6px; }
-
-  /* Legacy tab buttons */
-  .tab-btn {
-    background: none; border: none; border-bottom: 3px solid transparent;
-    border-radius: 0; padding: 8px 18px; font-size: 0.9rem; font-weight: 600;
-    color: #718096; cursor: pointer; margin-bottom: -2px;
-  }
-  .tab-btn:hover { color: var(--primary); filter: none; }
-  .tab-active { color: var(--primary); border-bottom-color: var(--accent); }
-  #dropzone { border: 2px dashed var(--accent); border-radius: 10px; padding: 38px 16px;
-    text-align: center; color: #4a5568; cursor: pointer; transition: background .15s;
-    background: #f0f6ff; }
-  #dropzone.drag { background: #dbeafe; border-color: var(--primary); }
-  #csvDropzone.drag { background: #dbeafe; border-color: var(--primary); }
-
-  /* Details/summary (legacy section) */
-  details { margin-top: 4px; }
-  details summary {
-    cursor: pointer; font-size: 0.88rem; color: var(--accent); padding: 6px 0; user-select: none;
-  }
-  details[open] summary { color: var(--primary); }
-  details .inner-wrap { padding-top: 10px; }
+  #legacy-wrap .file-zone:hover { background: #dbeafe; }
+  #legacy-wrap .file-zone strong { color: var(--primary); }
+  #legacy-wrap .file-zone label { cursor: pointer; display: block; }
+  #legacy-wrap .file-zone input[type="file"] { display: none; }
+  #legacy-wrap .file-zone .muted { margin: 4px 0 0; font-size: 0.8rem; color: #718096; }
+  #legacy-wrap .ingest-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  /* Grid / field */
+  #legacy-wrap .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 18px; }
+  #legacy-wrap .field { display: flex; flex-direction: column; }
+  #legacy-wrap .field label { font-size: 0.78rem; font-weight: 600; color: #4a5568; margin-bottom: 4px; }
+  #legacy-wrap .field input { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; }
+  #legacy-wrap .field input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(49,130,206,0.18); }
+  #legacy-wrap .hint { font-size: 0.72rem; color: var(--warning); margin-top: 3px; }
+  /* Table */
+  #legacy-wrap table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  #legacy-wrap th, #legacy-wrap td { border: 1px solid var(--border); padding: 6px 8px; text-align: left; vertical-align: middle; }
+  #legacy-wrap th { background: #edf2f7; color: var(--primary); font-weight: 600; white-space: nowrap; }
+  #legacy-wrap td input[type="number"] { width: 56px; border: 1px solid var(--border); background: #f7fafc; font-size: 0.85rem; padding: 4px 5px; text-align: center; border-radius: 4px; }
+  #legacy-wrap .col-box   { width: 68px; text-align: center; }
+  #legacy-wrap .col-shr   { width: 52px; text-align: center; }
+  #legacy-wrap .col-exp   { width: 36px; text-align: center; }
+  #legacy-wrap .col-items { width: 52px; text-align: center; }
+  #legacy-wrap .col-lin   { width: 70px; font-family: monospace; }
+  #legacy-wrap .col-niin  { width: 90px; font-family: monospace; }
+  #legacy-wrap .col-serial { font-family: monospace; }
+  #legacy-wrap .shr-match { color: var(--success); font-weight: 700; font-size: 1rem; }
+  #legacy-wrap .shr-warn  { color: var(--warning); font-weight: 700; font-size: 1rem; cursor: pointer; text-decoration: underline dotted; }
+  #legacy-wrap .shr-none  { color: #a0aec0; }
+  #legacy-wrap .expander-btn { background: none; border: none; font-size: 1rem; cursor: pointer; color: var(--accent); padding: 2px 4px; border-radius: 4px; }
+  #legacy-wrap tr.items-row td { background: #f7fafc; padding: 10px 14px; }
+  #legacy-wrap tr.items-row table { font-size: 0.8rem; margin: 0; }
+  #legacy-wrap tr.detail-row td { background: #fffbea; padding: 10px 14px; }
+  #legacy-wrap tr.zoh-row td { background: #fffaf0; }
+  #legacy-wrap tr.row-excluded td { opacity: 0.45; text-decoration: line-through; }
+  #legacy-wrap .badge-zoh { background: #feebc8; color: #744210; }
+  #legacy-wrap .badge-grp { background: #c3dafe; color: #2a4365; }
+  #legacy-wrap .btn-xs { display:inline-block; font-size: 0.66rem; padding: 2px 6px; margin-top: 4px; cursor: pointer; border: 1px solid #cbd5e0; border-radius: 4px; background: #edf2f7; color: var(--primary); }
+  #legacy-wrap .boxes-bar { font-size: 0.82rem; color: #2d3748; background: #edf2f7; border-radius: 6px; padding: 6px 12px; display: inline-block; margin-bottom: 10px; }
+  #legacy-wrap .boxes-bar strong { color: var(--primary); }
+  #legacy-wrap .recon-summary { font-size: 0.82rem; color: #4a5568; margin-bottom: 14px; }
+  #legacy-wrap .recon-summary .badge { display: inline-block; font-size: 0.7rem; font-weight: 700; padding: 2px 7px; border-radius: 4px; margin-left: 6px; }
+  #legacy-wrap .badge-clean   { background: #c6f6d5; color: #22543d; }
+  #legacy-wrap .badge-flagged { background: #feebc8; color: #744210; }
+  #legacy-wrap button { font-size: 0.9rem; font-weight: 600; border: none; border-radius: 7px; padding: 9px 16px; cursor: pointer; transition: filter .15s; }
+  #legacy-wrap button:hover { filter: brightness(0.94); }
+  #legacy-wrap button:disabled { opacity: 0.5; cursor: not-allowed; filter: none; }
+  #legacy-wrap .btn-primary { background: var(--accent);  color: #fff; }
+  #legacy-wrap .btn-success { background: var(--success); color: #fff; }
+  #legacy-wrap .btn-ghost   { background: #edf2f7;        color: var(--primary); }
+  #legacy-wrap .btn-danger  { background: var(--danger);  color: #fff; padding: 5px 10px; font-size: 0.78rem; }
+  #legacy-wrap .btn-sm      { padding: 5px 10px; font-size: 0.78rem; }
+  #legacy-wrap .btn-row     { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
+  #legacy-wrap .actions     { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  #legacy-wrap .muted       { color: #718096; font-size: 0.8rem; }
+  #legacy-wrap .audit-status { font-weight: 700; padding: 8px 12px; border-radius: 6px; display: inline-block; margin-bottom: 10px; }
+  #legacy-wrap .audit-pass  { background: #c6f6d5; color: #22543d; }
+  #legacy-wrap .audit-fail  { background: #fed7d7; color: #742a2a; }
+  #legacy-wrap ul.issues    { list-style: none; padding: 0; margin: 0; }
+  #legacy-wrap ul.issues li { padding: 7px 10px; border-radius: 5px; margin-bottom: 6px; font-size: 0.85rem; }
+  #legacy-wrap li.sev-ERROR   { background: #fff5f5; border-left: 4px solid var(--danger); color: var(--danger); }
+  #legacy-wrap li.sev-WARNING { background: #fffaf0; border-left: 4px solid var(--warning); color: #975a16; }
+  #legacy-wrap .badge-ERROR   { background: var(--danger);  color: #fff; }
+  #legacy-wrap .badge-WARNING { background: var(--warning); color: #fff; }
+  #legacy-wrap .badge         { display:inline-block; font-size:0.7rem; font-weight:700; padding:1px 6px; border-radius:4px; margin-right:6px; }
+  #legacy-wrap .tab-btn       { background: none; border: none; border-bottom: 3px solid transparent; border-radius: 0; padding: 8px 18px; font-size: 0.9rem; font-weight: 600; color: #718096; cursor: pointer; margin-bottom: -2px; }
+  #legacy-wrap .tab-btn:hover { color: var(--primary); filter: none; }
+  #legacy-wrap .tab-active    { color: var(--primary); border-bottom-color: var(--accent); }
+  #legacy-wrap #dropzone      { border: 2px dashed var(--accent); border-radius: 10px; padding: 38px 16px; text-align: center; color: #4a5568; cursor: pointer; transition: background .15s; background: #f0f6ff; }
+  #legacy-wrap #dropzone.drag { background: #dbeafe; border-color: var(--primary); }
+  #legacy-wrap #csvDropzone.drag { background: #dbeafe; border-color: var(--primary); }
+  #legacy-wrap details        { margin-top: 4px; }
+  #legacy-wrap details summary { cursor: pointer; font-size: 0.88rem; color: var(--accent); padding: 6px 0; user-select: none; }
+  #legacy-wrap details[open] summary { color: var(--primary); }
+  #legacy-wrap .inner-wrap    { padding-top: 10px; }
+  #legacy-wrap .detail-panel  { font-size: 0.82rem; }
+  #legacy-wrap .detail-panel ul { margin: 6px 0 0; padding-left: 18px; }
+  #legacy-wrap .detail-panel li { margin-bottom: 3px; }
+  #legacy-wrap .detail-field-table { border-collapse: collapse; font-size: 0.8rem; margin-top: 8px; }
+  #legacy-wrap .detail-field-table th, #legacy-wrap .detail-field-table td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
+  #legacy-wrap .detail-field-table th { background: #edf2f7; }
+  #legacy-wrap .field-ok   { color: var(--success); }
+  #legacy-wrap .field-diff { color: var(--danger); }
 </style>
-</head>
-<body>
-<header class="appbar">
-  <h1>Master DD1750 Packing List Generator</h1>
-  <p>CONNEX packing flow: drop SHR + BOM PDFs &rarr; review auto-extracted table &rarr; assign boxes &rarr; download individual 1750s or master packing list.</p>
-</header>
 
-<div class="wrap">
+<!-- ============================================================
+     SCRIPTS
+     app.js — new 3-column workflow (ES module; imports glossary.js)
+     Legacy inline script — the original 2D packing flow, unchanged.
+     ============================================================ -->
 
-<!-- ======================================================= -->
-<!-- SECTION 1: DROP ZONE — SHR + BOM INGEST                 -->
-<!-- ======================================================= -->
-<div class="card">
-  <h2>1 &middot; Upload Source Files</h2>
+<!-- New 3D connex workflow — ES module so it can import glossary.js -->
+<script type="module" src="/static/app.js"></script>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:12px;">
-
-    <!-- SHR drop zone -->
-    <div>
-      <div style="font-size:0.8rem;font-weight:600;color:#4a5568;margin-bottom:6px;">Sub Hand Receipt (optional)</div>
-      <div class="file-zone" id="shrZone">
-        <label for="shrInput">
-          <strong>Drop SHR PDF here</strong> or click to browse
-          <div class="muted">Single .pdf — used for reconciliation / SHR consistency checks.</div>
-          <input type="file" id="shrInput" accept="application/pdf">
-        </label>
-      </div>
-      <div id="shrFileLabel" class="muted" style="min-height:1.2em;"></div>
-    </div>
-
-    <!-- BOM drop zone -->
-    <div>
-      <div style="font-size:0.8rem;font-weight:600;color:#4a5568;margin-bottom:6px;">BOM PDFs</div>
-      <div class="file-zone" id="bomZone">
-        <label for="bomInput">
-          <strong>Drop BOM PDFs here</strong> or click to browse
-          <div class="muted">Multiple files OK — one BOM PDF per end item.</div>
-          <input type="file" id="bomInput" accept="application/pdf" multiple>
-        </label>
-      </div>
-      <div id="bomFileLabel" class="muted" style="min-height:1.2em;"></div>
-    </div>
-
-  </div>
-
-  <div class="ingest-row">
-    <button class="btn-primary" id="ingestBtn" onclick="doIngest()">Ingest &rarr; Extract</button>
-    <span id="ingestStatus"></span>
-  </div>
-</div>
-
-<!-- ======================================================= -->
-<!-- SECTION 2: REVIEW TABLE                                 -->
-<!-- ======================================================= -->
-<div class="card" id="reviewSection" style="display:none;">
-  <h2>2 &middot; Review &amp; Assign Boxes</h2>
-
-  <!-- Boxes in use + auto-assign + condense duplicates -->
-  <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
-    <div class="boxes-bar" id="boxesBar">Boxes in use: —</div>
-    <button class="btn-ghost btn-sm" id="autoAssignBtn" onclick="autoAssign()">Auto-assign 1..N</button>
-    <button class="btn-ghost btn-sm" id="condenseDupBtn" onclick="condenseDuplicates()" title="Group like end items (same LIN/NIIN) into shared boxes and recount 1..N">Re-group like items (recount 1..N)</button>
-    <span id="condenseDupStatus" class="muted" style="font-size:0.8rem;"></span>
-  </div>
-
-  <!-- Reconcile summary (shown when SHR was uploaded) -->
-  <div class="recon-summary" id="reconSummary" style="display:none;"></div>
-
-  <table id="reviewTable">
-    <thead>
-      <tr>
-        <th class="col-exp"></th>
-        <th class="col-box">Box #</th>
-        <th>File</th>
-        <th>Nomenclature</th>
-        <th>Model</th>
-        <th class="col-lin">LIN</th>
-        <th class="col-niin">NIIN</th>
-        <th class="col-serial">Serial</th>
-        <th class="col-items">Items</th>
-        <th class="col-shr">SHR</th>
-      </tr>
-    </thead>
-    <tbody id="reviewBody">
-      <!-- rows injected by JS -->
-    </tbody>
-  </table>
-</div>
-
-<!-- ======================================================= -->
-<!-- SECTION 3: HEADER FORM                                  -->
-<!-- ======================================================= -->
-<div class="card" id="headerSection" style="display:none;">
-  <h2>3 &middot; Header Information</h2>
-  <div class="grid">
-    <!-- individual 1750 fields -->
-    <div class="field">
-      <label>Packed By — RANK, LAST, FIRST</label>
-      <input id="h_packed_by" placeholder="SSG MORRIS, JOHN">
-    </div>
-    <div class="field">
-      <label>UIC</label>
-      <input id="h_uic" placeholder="WABCD0">
-    </div>
-    <div class="field">
-      <label>Battery</label>
-      <input id="h_battery" placeholder="B BTY">
-    </div>
-    <div class="field">
-      <label>Battalion</label>
-      <input id="h_battalion" placeholder="2-55 ADA">
-    </div>
-    <div class="field">
-      <label>SHRH POC</label>
-      <input id="h_shrh" placeholder="CPT JONES">
-    </div>
-    <div class="field">
-      <label>SLOC / Section</label>
-      <input id="h_sloc" placeholder="BLDG-100 / SEC">
-    </div>
-    <div class="field">
-      <label>Container #</label>
-      <input id="h_container" placeholder="CONEX-01">
-    </div>
-    <div class="field">
-      <label>SUN #</label>
-      <input id="h_sun" placeholder="SUN-2026-001">
-    </div>
-    <div class="field">
-      <label>SEAL #</label>
-      <input id="h_seal" placeholder="SEAL-4455">
-    </div>
-    <div class="field">
-      <label>Date</label>
-      <input id="h_date" placeholder="15 JUN 2026">
-    </div>
-    <div class="field" style="grid-column:1/-1;">
-      <label>Signer Name / Title</label>
-      <input id="h_signer_name" placeholder="1LT BAKER, SAM">
-      <span class="hint">Must differ from Packed By (e.g. 1LT BAKER, SAM).</span>
-    </div>
-  </div>
-</div>
-
-<!-- ======================================================= -->
-<!-- SECTION 4: GENERATE                                     -->
-<!-- ======================================================= -->
-<div class="card" id="generateSection" style="display:none;">
-  <h2>4 &middot; Generate Documents</h2>
-  <div id="genReconSummary" class="recon-summary" style="margin-bottom:10px;"></div>
-  <div class="actions" style="flex-wrap:wrap;gap:12px;">
-    <button class="btn-success" id="genIndividualsBtn" onclick="generateIndividuals()">
-      Download Individual 1750s (ZIP)
-    </button>
-    <button class="btn-primary" id="genMasterBtn" onclick="generateMaster()">
-      Download Master 1750 (PDF)
-    </button>
-    <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem;font-weight:600;color:#4a5568;cursor:pointer;">
-      <input type="checkbox" id="condenseChk" checked style="width:15px;height:15px;cursor:pointer;">
-      Condense duplicate items (merge identical lines, sum qty)
-    </label>
-  </div>
-  <div id="genStatus" class="muted" style="margin-top:8px;"></div>
-</div>
-
-<!-- ======================================================= -->
-<!-- LEGACY TOOLS (collapsed)                                -->
-<!-- ======================================================= -->
-<details>
-  <summary>&#9656; Legacy tools (individual 1750 PDFs / SHR CSV)</summary>
-  <div class="inner-wrap">
-
-    <div class="card" style="margin-top:12px;">
-      <h2>Upload Source</h2>
-      <div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid var(--border);">
-        <button id="tabPdf" class="tab-btn tab-active" onclick="switchTab('pdf')">Individual 1750 PDFs</button>
-        <button id="tabCsv" class="tab-btn" onclick="switchTab('csv')">SHR Extract CSV</button>
-      </div>
-
-      <div id="panelPdf">
-        <div id="dropzone">
-          <p><strong>Drag &amp; drop</strong> individual 1750 PDFs here, or <strong>click to browse</strong>.</p>
-          <p class="muted">Filenames are parsed for Model / LIN / Serial. Multiple files OK.</p>
-          <input type="file" id="fileInput" accept="application/pdf" multiple style="display:none;">
-        </div>
-        <div id="uploadStatus"></div>
-      </div>
-
-      <div id="panelCsv" style="display:none;">
-        <div id="csvDropzone" style="border:2px dashed var(--accent);border-radius:10px;padding:38px 16px;text-align:center;color:#4a5568;cursor:pointer;background:#f0f6ff;">
-          <p><strong>Drag &amp; drop</strong> the SHR extract CSV here, or <strong>click to browse</strong>.</p>
-          <p class="muted">Export from the SHR Extractor tool first, then upload here.</p>
-          <input type="file" id="csvInput" accept=".csv" style="display:none;">
-        </div>
-        <div id="csvStatus"></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Header Information (Legacy)</h2>
-      <div class="grid">
-        <div class="field"><label>UIC</label><input id="l_uic" placeholder="WABCD0"></div>
-        <div class="field"><label>Battery</label><input id="l_battery" placeholder="B BTY"></div>
-        <div class="field"><label>Battalion</label><input id="l_battalion" placeholder="1-1 ADA"></div>
-        <div class="field"><label>Packed By (RANK LAST, FIRST)</label><input id="l_packed_by" placeholder="SSG SMITH, JOHN"></div>
-        <div class="field"><label>SHRH POC</label><input id="l_shrh" placeholder="CPT JONES"></div>
-        <div class="field"><label>SLOC / Section</label><input id="l_sloc" placeholder="BLDG-100 / SEC"></div>
-        <div class="field"><label>Container #</label><input id="l_container" placeholder="CONEX-01"></div>
-        <div class="field"><label>SUN #</label><input id="l_sun" placeholder="SUN-2026-001"></div>
-        <div class="field"><label>SEAL #</label><input id="l_seal" placeholder="SEAL-4455"></div>
-        <div class="field"><label>Date</label><input id="l_date" placeholder="15 JUN 2026"></div>
-        <div class="field">
-          <label>Signer Name / Title</label>
-          <input id="l_signer_name" placeholder="1LT BAKER, SAM">
-          <span class="hint">Must differ from Packed By.</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Review &amp; Edit Rows (Legacy)</h2>
-      <table id="rowsTable">
-        <thead>
-          <tr>
-            <th class="col-box">Box #</th>
-            <th>Model / Nomenclature</th>
-            <th>LIN</th>
-            <th>NSN</th>
-            <th>Serials (comma-separated)</th>
-            <th class="col-items">Qty</th>
-            <th style="width:70px;text-align:center;"></th>
-          </tr>
-        </thead>
-        <tbody id="rowsBody"></tbody>
-      </table>
-      <div class="btn-row">
-        <button class="btn-ghost" id="addRowBtn">+ Add Row</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Generate / Audit (Legacy)</h2>
-      <div class="actions">
-        <button class="btn-success" id="generateBtn">Generate Master 1750 (PDF)</button>
-        <button class="btn-primary" id="auditBtn">Run Audit</button>
-      </div>
-    </div>
-
-    <div class="card" id="auditPanel">
-      <h2>Audit Results</h2>
-      <div id="auditStatus"></div>
-      <ul class="issues" id="auditIssues"></ul>
-    </div>
-
-  </div><!-- /inner-wrap -->
-</details>
-
-</div><!-- /wrap -->
-
+<!-- Legacy 2D packing flow — kept intact as non-module so its
+     globals (legacyDoIngest, legacyAutoAssign, …) remain available
+     to the onclick handlers in the legacy section above.
+     Prefixed with "legacy" to avoid collisions with app.js globals. -->
 <script>
 /* ================================================================== *
- * Master DD1750 — unified connex packing flow (vanilla JS, no build).
+ * Legacy DD1750 packing flow — unchanged logic from original tool.
+ * All functions prefixed "legacy" to prevent name collisions with app.js.
  * ================================================================== */
 
-const $ = (id) => document.getElementById(id);
+const $leg = (id) => document.getElementById(id);
 
-/* ---- Utility: escape HTML to prevent XSS in injected text ---- */
-function esc(s) {
+function legacyEsc(s) {
   return String(s == null ? "" : s)
     .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
     .replace(/"/g,"&quot;");
 }
 
-/* ---- State ---- */
-let STATE = {
+let LEGACY_STATE = {
   job_id: null,
-  boms: [],           // array of BOM objects from /ingest
-  occupied_boxes: [], // array of box numbers currently in use
-  reconcile_data: {}, // keyed by bom_id, loaded lazily from /reconcile
+  boms: [],
+  occupied_boxes: [],
+  reconcile_data: {},
   has_shr: false,
 };
 
-/* ================================================================== *
- * SECTION 1 — FILE INPUTS + INGEST
- * ================================================================== */
-
-/* Show selected filenames next to their zones */
-$("shrInput").addEventListener("change", function() {
-  $("shrFileLabel").textContent = this.files.length ? this.files[0].name : "";
+/* File label display */
+($leg("shrInput") || {}).addEventListener && $leg("shrInput").addEventListener("change", function() {
+  $leg("shrFileLabel").textContent = this.files.length ? this.files[0].name : "";
 });
-$("bomInput").addEventListener("change", function() {
+($leg("bomInput") || {}).addEventListener && $leg("bomInput").addEventListener("change", function() {
   const n = this.files.length;
-  $("bomFileLabel").textContent = n ? `${n} file${n===1?"":"s"} selected` : "";
+  $leg("bomFileLabel").textContent = n ? `${n} file${n===1?"":"s"} selected` : "";
 });
 
-/* Drag-over highlight for custom file-zone divs */
+/* Drag highlights for legacy file zones */
 ["shrZone","bomZone"].forEach(zoneId => {
-  const zone = $(zoneId);
+  const zone = $leg(zoneId);
+  if (!zone) return;
   zone.addEventListener("dragover", e => { e.preventDefault(); zone.style.background="#dbeafe"; });
   zone.addEventListener("dragleave", () => { zone.style.background=""; });
-  zone.addEventListener("drop", e => {
-    e.preventDefault(); zone.style.background = "";
-    // Forward dropped files to the hidden input inside this zone
-    const input = zone.querySelector("input[type=file]");
-    // DataTransfer doesn't allow setting .files directly on most browsers,
-    // but the drag-drop onto the label will trigger naturally via the input.
-    // This handler is just for visual feedback — actual files come from the input's change event.
-  });
+  zone.addEventListener("drop", e => { e.preventDefault(); zone.style.background=""; });
 });
 
-/* Main INGEST handler — POST /ingest with SHR + BOM files */
-async function doIngest() {
-  const shrInput = $("shrInput");
-  const bomInput = $("bomInput");
-  const status   = $("ingestStatus");
-  const btn      = $("ingestBtn");
+async function legacyDoIngest() {
+  const shrInput = $leg("shrInput");
+  const bomInput = $leg("bomInput");
+  const status   = $leg("ingestStatus");
+  const btn      = $leg("ingestBtn");
+  if (!bomInput.files.length) { status.textContent = "Please select at least one BOM PDF."; return; }
 
-  if (!bomInput.files.length) {
-    status.textContent = "Please select at least one BOM PDF.";
-    return;
-  }
-
-  // Build multipart form: boms (repeat) + optional shr
   const fd = new FormData();
   for (const f of bomInput.files) fd.append("boms", f);
   if (shrInput.files.length) fd.append("shr", shrInput.files[0]);
 
   btn.disabled = true;
   status.textContent = `Extracting ${bomInput.files.length} BOM(s)…`;
-
   try {
     const resp = await fetch("/ingest", { method: "POST", body: fd });
     const data = await resp.json();
-
-    if (!resp.ok) {
-      status.textContent = "Error: " + (data.error || resp.statusText);
-      btn.disabled = false;
-      return;
-    }
-
-    /* Store state */
-    STATE.job_id         = data.job_id;
-    STATE.boms           = data.boms || [];
-    STATE.occupied_boxes = data.occupied_boxes || [];
-    STATE.has_shr        = !!shrInput.files.length;
-    STATE.reconcile_data = {};
-
-    status.textContent = `Extracted ${STATE.boms.length} BOM(s). Review below.`;
-
-    /* Pre-fill header suggestions */
+    if (!resp.ok) { status.textContent = "Error: " + (data.error || resp.statusText); btn.disabled=false; return; }
+    LEGACY_STATE.job_id = data.job_id;
+    LEGACY_STATE.boms   = data.boms || [];
+    LEGACY_STATE.occupied_boxes = data.occupied_boxes || [];
+    LEGACY_STATE.has_shr = !!shrInput.files.length;
+    LEGACY_STATE.reconcile_data = {};
+    status.textContent = `Extracted ${LEGACY_STATE.boms.length} BOM(s). Review below.`;
     if (data.suggested_header) {
-      if (data.suggested_header.uic  && !$("h_uic").value)  $("h_uic").value  = data.suggested_header.uic;
-      if (data.suggested_header.date && !$("h_date").value) $("h_date").value = data.suggested_header.date;
+      if (data.suggested_header.uic  && !$leg("h_uic").value)  $leg("h_uic").value  = data.suggested_header.uic;
+      if (data.suggested_header.date && !$leg("h_date").value) $leg("h_date").value = data.suggested_header.date;
     }
-
-    /* Show reconcile summary if SHR was uploaded */
     const rs = data.reconcile_summary;
-    if (rs && STATE.has_shr) {
-      const total = rs.total || 0, clean = rs.clean || 0, flagged = rs.flagged || 0;
-      const html = `SHR reconciliation: <strong>${total}</strong> BOMs &nbsp;`
-        + `<span class="badge badge-clean">${clean} clean</span>`
-        + `<span class="badge badge-flagged">${flagged} flagged</span>`;
-      $("reconSummary").innerHTML = html;
-      $("reconSummary").style.display = "";
-      $("genReconSummary").innerHTML = `${total} BOMs &middot; ${clean} clean &middot; ${flagged} flagged — generation is advisory, not blocked.`;
+    if (rs && LEGACY_STATE.has_shr) {
+      const total = rs.total||0, clean=rs.clean||0, flagged=rs.flagged||0;
+      $leg("reconSummary").innerHTML = `SHR reconciliation: <strong>${total}</strong> BOMs &nbsp;`
+        +`<span class="badge badge-clean">${clean} clean</span>`
+        +`<span class="badge badge-flagged">${flagged} flagged</span>`;
+      $leg("reconSummary").style.display = "";
+      $leg("genReconSummary").innerHTML = `${total} BOMs &middot; ${clean} clean &middot; ${flagged} flagged — generation is advisory, not blocked.`;
     } else {
-      $("reconSummary").style.display = "none";
-      $("genReconSummary").textContent = `${STATE.boms.length} BOMs loaded. No SHR — reconciliation skipped.`;
+      $leg("reconSummary").style.display = "none";
+      $leg("genReconSummary").textContent = `${LEGACY_STATE.boms.length} BOMs loaded. No SHR.`;
     }
-
-    renderReviewTable();
-    updateBoxesBar();
-
-    /* Reveal the downstream sections */
-    $("reviewSection").style.display  = "";
-    $("headerSection").style.display  = "";
-    $("generateSection").style.display = "";
-
+    legacyRenderReviewTable();
+    legacyUpdateBoxesBar();
+    $leg("reviewSection").style.display  = "";
+    $leg("headerSection").style.display  = "";
+    $leg("generateSection").style.display = "";
     btn.disabled = false;
-  } catch (e) {
-    status.textContent = "Ingest failed: " + e.message;
-    btn.disabled = false;
-  }
+  } catch(e) { status.textContent = "Ingest failed: " + e.message; btn.disabled=false; }
 }
 
-/* ================================================================== *
- * SECTION 2 — REVIEW TABLE
- * ================================================================== */
-
-/* Render the full BOM review table from STATE.boms */
-function renderReviewTable() {
-  const tbody = $("reviewBody");
+function legacyRenderReviewTable() {
+  const tbody = $leg("reviewBody");
   tbody.innerHTML = "";
-
-  /* Count how many BOMs share each box so we can offer "Separate" only on
-     grouped boxes (a box of 50 M4s) and not on solo boxes. */
   const boxCounts = {};
-  STATE.boms.forEach((bom, idx) => {
+  LEGACY_STATE.boms.forEach((bom,idx) => {
     if (bom._excluded) return;
-    const b = bom.box_num != null ? bom.box_num : idx + 1;
-    boxCounts[b] = (boxCounts[b] || 0) + 1;
+    const b = bom.box_num!=null ? bom.box_num : idx+1;
+    boxCounts[b] = (boxCounts[b]||0)+1;
   });
-
-  STATE.boms.forEach((bom, idx) => {
-    const rowId    = `bom-${bom.bom_id}`;
-    const itemsId  = `items-${bom.bom_id}`;
-    const detailId = `detail-${bom.bom_id}`;
-
-    /* --- Build SHR status cell --- */
+  LEGACY_STATE.boms.forEach((bom,idx) => {
+    const rowId=`bom-${bom.bom_id}`, itemsId=`items-${bom.bom_id}`, detailId=`detail-${bom.bom_id}`;
     let shrCell = "";
-    if (!STATE.has_shr || bom.reconcile_status == null) {
+    if (!LEGACY_STATE.has_shr || bom.reconcile_status==null) {
       shrCell = `<span class="shr-none">—</span>`;
-    } else if (bom.reconcile_status === "match") {
+    } else if (bom.reconcile_status==="match") {
       shrCell = `<span class="shr-match" title="SHR match">&#10003;</span>`;
     } else {
-      // mismatch / partial / not_in_shr — clickable warning that opens detail panel
-      shrCell = `<span class="shr-warn" title="Click for details" onclick="toggleDetail('${bom.bom_id}')">&#9888;</span>`;
+      shrCell = `<span class="shr-warn" title="Click for details" onclick="legacyToggleDetail('${bom.bom_id}')">&#9888;</span>`;
     }
-
-    /* --- Main BOM row --- */
-    const zoh      = !!bom.zero_on_hand;
-    const excluded = !!bom._excluded;
-    const tr = document.createElement("tr");
-    tr.id = rowId;
-    if (zoh)      tr.classList.add("zoh-row");
-    if (excluded) tr.classList.add("row-excluded");
-
-    const curBox  = bom.box_num != null ? bom.box_num : idx + 1;
-    const shared  = !excluded && (boxCounts[curBox] || 0) > 1;
-    const zohBadge = zoh
-      ? `<span class="badge badge-zoh" title="No on-hand components — verify this box is physically present">ZERO ON-HAND</span>`
-      : "";
-    const grpBadge = shared
-      ? `<span class="badge badge-grp" title="${boxCounts[curBox]} like items grouped in box ${curBox}">${boxCounts[curBox]}× IN BOX ${curBox}</span>`
-      : "";
-    const exclBtn = `<button class="btn-xs" title="Keep or drop this box before generating"
-        onclick="toggleExclude('${bom.bom_id}')">${excluded ? "Restore" : "Exclude"}</button>`;
-    const sepBtn = shared
-      ? `<button class="btn-xs" title="Pull this end item into its own new box"
-          onclick="separateBom('${bom.bom_id}')">Separate</button>`
-      : "";
-
-    tr.innerHTML = `
-      <td class="col-exp">
-        <button class="expander-btn" title="Show/hide items" onclick="toggleItems('${bom.bom_id}')">&#9655;</button>
-      </td>
+    const zoh=!!bom.zero_on_hand, excluded=!!bom._excluded;
+    const tr=document.createElement("tr");
+    tr.id=rowId;
+    if(zoh)      tr.classList.add("zoh-row");
+    if(excluded) tr.classList.add("row-excluded");
+    const curBox=bom.box_num!=null?bom.box_num:idx+1;
+    const shared=!excluded&&(boxCounts[curBox]||0)>1;
+    const zohBadge=zoh?`<span class="badge badge-zoh">ZERO ON-HAND</span>`:"";
+    const grpBadge=shared?`<span class="badge badge-grp">${boxCounts[curBox]}× IN BOX ${curBox}</span>`:"";
+    const exclBtn=`<button class="btn-xs" onclick="legacyToggleExclude('${bom.bom_id}')">${excluded?"Restore":"Exclude"}</button>`;
+    const sepBtn=shared?`<button class="btn-xs" onclick="legacySeparateBom('${bom.bom_id}')">Separate</button>`:"";
+    tr.innerHTML=`<td class="col-exp"><button class="expander-btn" onclick="legacyToggleItems('${bom.bom_id}')">&#9655;</button></td>
       <td class="col-box">
-        <input type="number" min="1" id="box-${bom.bom_id}"
-               value="${esc(curBox)}"
-               ${excluded ? "disabled" : ""}
-               onchange="assignBox('${bom.bom_id}', this.value)"><br>
-        ${exclBtn}${sepBtn}
+        <input type="number" min="1" id="box-${bom.bom_id}" value="${legacyEsc(curBox)}" ${excluded?"disabled":""} onchange="legacyAssignBox('${bom.bom_id}',this.value)"><br>${exclBtn}${sepBtn}
       </td>
-      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
-          title="${esc(bom.filename)}">${esc(bom.filename)}</td>
-      <td>${zohBadge}${grpBadge}${esc(bom.nomenclature)}</td>
-      <td>${esc(bom.model)}</td>
-      <td class="col-lin">${esc(bom.lin)}</td>
-      <td class="col-niin">${esc(bom.end_item_niin)}</td>
-      <td class="col-serial">${esc(bom.serial_number)}</td>
-      <td class="col-items">${esc(bom.item_count)}</td>
-      <td class="col-shr">${shrCell}</td>
-    `;
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${legacyEsc(bom.filename)}">${legacyEsc(bom.filename)}</td>
+      <td>${zohBadge}${grpBadge}${legacyEsc(bom.nomenclature)}</td>
+      <td>${legacyEsc(bom.model)}</td>
+      <td class="col-lin">${legacyEsc(bom.lin)}</td>
+      <td class="col-niin">${legacyEsc(bom.end_item_niin)}</td>
+      <td class="col-serial">${legacyEsc(bom.serial_number)}</td>
+      <td class="col-items">${legacyEsc(bom.item_count)}</td>
+      <td class="col-shr">${shrCell}</td>`;
     tbody.appendChild(tr);
 
-    /* --- Items sub-table row (hidden by default) --- */
-    const itemsTr = document.createElement("tr");
-    itemsTr.id = itemsId;
-    itemsTr.className = "items-row";
-    itemsTr.style.display = "none";
-
-    const items = bom.items || [];
-    let itemsHtml = `<td colspan="10">
-      <div style="margin-bottom:6px;font-size:0.8rem;font-weight:600;color:var(--primary);">
-        Items in ${esc(bom.filename)} — assign individual box numbers to split across boxes:
-      </div>
-      <table>
-        <thead><tr>
-          <th style="width:52px;text-align:center;">Box #</th>
-          <th style="width:52px;">Line</th>
-          <th>Description</th>
-          <th style="width:90px;">NSN</th>
-          <th style="width:52px;">Qty</th>
-        </tr></thead>
-        <tbody>`;
-
-    items.forEach(item => {
-      const itemKey = `${bom.bom_id}:${item.line_no}`;
-      itemsHtml += `<tr>
-        <td style="text-align:center;">
-          <input type="number" min="1" style="width:50px;" id="ibox-${itemKey.replace(':','-')}"
-                 value="${esc(bom.box_num != null ? bom.box_num : idx+1)}"
-                 onchange="assignItemBox('${itemKey}', this.value)">
-        </td>
-        <td>${esc(item.line_no)}</td>
-        <td>${esc(item.description)}</td>
-        <td style="font-family:monospace;">${esc(item.nsn)}</td>
-        <td>${esc(item.qty)} ${esc(item.unit_of_issue)}</td>
-      </tr>`;
+    /* items sub-row */
+    const itemsTr=document.createElement("tr");
+    itemsTr.id=itemsId; itemsTr.className="items-row"; itemsTr.style.display="none";
+    const items=bom.items||[];
+    let html=`<td colspan="10"><div style="margin-bottom:6px;font-size:0.8rem;font-weight:600;color:var(--primary);">Items in ${legacyEsc(bom.filename)}:</div>
+      <table><thead><tr><th>Box #</th><th>Line</th><th>Description</th><th>NSN</th><th>Qty</th></tr></thead><tbody>`;
+    items.forEach(item=>{
+      const k=`${bom.bom_id}:${item.line_no}`;
+      html+=`<tr><td style="text-align:center;"><input type="number" min="1" style="width:50px;" value="${legacyEsc(curBox)}" onchange="legacyAssignItemBox('${k}',this.value)"></td>
+        <td>${legacyEsc(item.line_no)}</td><td>${legacyEsc(item.description)}</td><td style="font-family:monospace;">${legacyEsc(item.nsn)}</td><td>${legacyEsc(item.qty)} ${legacyEsc(item.unit_of_issue)}</td></tr>`;
     });
-
-    itemsHtml += `</tbody></table></td>`;
-    itemsTr.innerHTML = itemsHtml;
+    html+=`</tbody></table></td>`;
+    itemsTr.innerHTML=html;
     tbody.appendChild(itemsTr);
 
-    /* --- Mismatch detail row (hidden by default) --- */
-    const detailTr = document.createElement("tr");
-    detailTr.id = detailId;
-    detailTr.className = "detail-row";
-    detailTr.style.display = "none";
-    detailTr.innerHTML = `<td colspan="10">
-      <div class="detail-panel" id="detail-content-${bom.bom_id}">
-        <em class="muted">Loading reconciliation details…</em>
-      </div>
-    </td>`;
+    /* detail row */
+    const detailTr=document.createElement("tr"); detailTr.id=detailId; detailTr.className="detail-row"; detailTr.style.display="none";
+    detailTr.innerHTML=`<td colspan="10"><div class="detail-panel" id="detail-content-${bom.bom_id}"><em class="muted">Loading…</em></div></td>`;
     tbody.appendChild(detailTr);
   });
 }
 
-/* Toggle items sub-table row */
-function toggleItems(bomId) {
-  const itemsTr = $(`items-${bomId}`);
-  const btn = document.querySelector(`#bom-${bomId} .expander-btn`);
-  const open = itemsTr.style.display !== "none";
-  itemsTr.style.display = open ? "none" : "";
-  if (btn) btn.innerHTML = open ? "&#9655;" : "&#9661;";
+function legacyToggleItems(bomId) {
+  const el=$leg(`items-${bomId}`), btn=document.querySelector(`#bom-${bomId} .expander-btn`);
+  const open=el.style.display!=="none";
+  el.style.display=open?"none":"";
+  if(btn) btn.innerHTML=open?"&#9655;":"&#9661;";
 }
 
-/* Toggle mismatch detail row, lazy-loading /reconcile if needed */
-async function toggleDetail(bomId) {
-  const detailTr = $(`detail-${bomId}`);
-  const open = detailTr.style.display !== "none";
-
-  if (open) {
-    detailTr.style.display = "none";
-    return;
-  }
-
-  detailTr.style.display = "";
-
-  /* If we already have reconcile data for this BOM, just render it */
-  if (STATE.reconcile_data[bomId]) {
-    renderDetailPanel(bomId, STATE.reconcile_data[bomId]);
-    return;
-  }
-
-  /* Otherwise fetch /reconcile for the whole job, cache it all */
-  try {
-    const resp = await fetch("/reconcile", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: STATE.job_id }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) {
-      $(`detail-content-${bomId}`).textContent = "Reconcile error: " + (data.error || resp.statusText);
-      return;
-    }
-    /* Cache all BOMs from this single fetch */
-    STATE.reconcile_data = data.by_bom || {};
-    renderDetailPanel(bomId, STATE.reconcile_data[bomId]);
-  } catch (e) {
-    $(`detail-content-${bomId}`).textContent = "Reconcile fetch failed: " + e.message;
-  }
+async function legacyToggleDetail(bomId) {
+  const el=$leg(`detail-${bomId}`); const open=el.style.display!=="none";
+  if(open){el.style.display="none";return;}
+  el.style.display="";
+  if(LEGACY_STATE.reconcile_data[bomId]){legacyRenderDetail(bomId,LEGACY_STATE.reconcile_data[bomId]);return;}
+  try{
+    const resp=await fetch("/reconcile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({job_id:LEGACY_STATE.job_id})});
+    const data=await resp.json();
+    if(!resp.ok){$leg(`detail-content-${bomId}`).textContent="Reconcile error: "+(data.error||resp.statusText);return;}
+    LEGACY_STATE.reconcile_data=data.by_bom||{};
+    legacyRenderDetail(bomId,LEGACY_STATE.reconcile_data[bomId]);
+  }catch(e){$leg(`detail-content-${bomId}`).textContent="Reconcile fetch failed: "+e.message;}
 }
 
-/* Render the mismatch detail panel content for one BOM */
-function renderDetailPanel(bomId, bomRecon) {
-  const el = $(`detail-content-${bomId}`);
-  if (!bomRecon) {
-    el.innerHTML = `<em class="muted">No reconciliation data available for this BOM.</em>`;
-    return;
-  }
-
-  /* Status badge color */
-  const statusColor = bomRecon.status === "mismatch" ? "var(--danger)"
-    : bomRecon.status === "partial" ? "var(--warning)"
-    : "#718096";
-
-  let html = `<div style="margin-bottom:8px;">
-    <strong>Status:</strong>
-    <span style="color:${statusColor};font-weight:700;">${esc(bomRecon.status || "—")}</span>`;
-  if (bomRecon.matched_lin) {
-    html += ` &nbsp;|&nbsp; <strong>Matched LIN:</strong> <code>${esc(bomRecon.matched_lin)}</code>`;
-  }
-  html += `</div>`;
-
-  /* Messages list */
-  if (bomRecon.messages && bomRecon.messages.length) {
-    html += `<ul style="margin:0 0 8px;padding-left:18px;">`;
-    bomRecon.messages.forEach(m => { html += `<li>${esc(m)}</li>`; });
-    html += `</ul>`;
-  }
-
-  /* Per-field BOM vs SHR comparison table */
-  const fields = bomRecon.fields;
-  if (fields && Object.keys(fields).length) {
-    html += `<table class="detail-field-table">
-      <thead><tr><th>Field</th><th>BOM Value</th><th>SHR Value</th><th>Status</th></tr></thead>
-      <tbody>`;
-    for (const [fieldName, fdata] of Object.entries(fields)) {
-      const ok = fdata.status === "match";
-      const cls = ok ? "field-ok" : "field-diff";
-      html += `<tr>
-        <td><strong>${esc(fieldName)}</strong></td>
-        <td>${esc(fdata.bom)}</td>
-        <td>${esc(fdata.shr)}</td>
-        <td class="${cls}">${ok ? "&#10003;" : "&#9888;"} ${esc(fdata.status)}</td>
-      </tr>`;
+function legacyRenderDetail(bomId,bomRecon) {
+  const el=$leg(`detail-content-${bomId}`);
+  if(!bomRecon){el.innerHTML=`<em class="muted">No reconciliation data.</em>`;return;}
+  const sc=bomRecon.status==="mismatch"?"var(--danger)":bomRecon.status==="partial"?"var(--warning)":"#718096";
+  let html=`<div style="margin-bottom:8px;"><strong>Status:</strong><span style="color:${sc};font-weight:700;"> ${legacyEsc(bomRecon.status||"—")}</span>`;
+  if(bomRecon.matched_lin) html+=` &nbsp;|&nbsp; <strong>Matched LIN:</strong> <code>${legacyEsc(bomRecon.matched_lin)}</code>`;
+  html+=`</div>`;
+  if(bomRecon.messages&&bomRecon.messages.length) html+=`<ul style="margin:0 0 8px;padding-left:18px;">${bomRecon.messages.map(m=>`<li>${legacyEsc(m)}</li>`).join("")}</ul>`;
+  const fields=bomRecon.fields;
+  if(fields&&Object.keys(fields).length){
+    html+=`<table class="detail-field-table"><thead><tr><th>Field</th><th>BOM</th><th>SHR</th><th>Status</th></tr></thead><tbody>`;
+    for(const [fn,fd] of Object.entries(fields)){
+      const ok=fd.status==="match";
+      html+=`<tr><td><strong>${legacyEsc(fn)}</strong></td><td>${legacyEsc(fd.bom)}</td><td>${legacyEsc(fd.shr)}</td><td class="${ok?"field-ok":"field-diff"}">${ok?"&#10003;":"&#9888;"} ${legacyEsc(fd.status)}</td></tr>`;
     }
-    html += `</tbody></table>`;
+    html+=`</tbody></table>`;
   }
-
-  el.innerHTML = html;
+  el.innerHTML=html;
 }
 
-/* Update the "Boxes in use" display bar */
-function updateBoxesBar() {
-  const boxes = STATE.occupied_boxes;
-  const bar   = $("boxesBar");
-  if (!boxes || !boxes.length) {
-    bar.innerHTML = "Boxes in use: <strong>none</strong>";
-  } else {
-    const sorted = [...boxes].sort((a,b) => a-b);
-    bar.innerHTML = `Boxes in use: <strong>${sorted.join(", ")}</strong>`;
-  }
+function legacyUpdateBoxesBar() {
+  const boxes=LEGACY_STATE.occupied_boxes, bar=$leg("boxesBar");
+  if(!boxes||!boxes.length){bar.innerHTML="Boxes in use: <strong>none</strong>";return;}
+  bar.innerHTML=`Boxes in use: <strong>${[...boxes].sort((a,b)=>a-b).join(", ")}</strong>`;
 }
 
-/* Assign a whole BOM to a box number — POST /assign */
-async function assignBox(bomId, rawVal) {
-  const boxNum = parseInt(rawVal, 10);
-  if (isNaN(boxNum) || boxNum < 1) return;
-
-  try {
-    const resp = await fetch("/assign", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: STATE.job_id, moves: [{ bom_id: bomId, box_num: boxNum }] }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) {
-      console.error("Assign error:", data.error || resp.statusText);
-      return;
-    }
-    STATE.occupied_boxes = data.occupied_boxes || STATE.occupied_boxes;
-
-    /* Also update box_by_bom in local state */
-    if (data.box_by_bom && data.box_by_bom[bomId] != null) {
-      const bom = STATE.boms.find(b => b.bom_id === bomId);
-      if (bom) bom.box_num = data.box_by_bom[bomId];
-    }
-
-    updateBoxesBar();
-  } catch (e) {
-    console.error("assignBox fetch failed:", e.message);
-  }
+async function legacyAssignBox(bomId,rawVal) {
+  const boxNum=parseInt(rawVal,10); if(isNaN(boxNum)||boxNum<1)return;
+  try{
+    const resp=await fetch("/assign",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({job_id:LEGACY_STATE.job_id,moves:[{bom_id:bomId,box_num:boxNum}]})});
+    const data=await resp.json(); if(!resp.ok){console.error("Assign error:",data.error||resp.statusText);return;}
+    LEGACY_STATE.occupied_boxes=data.occupied_boxes||LEGACY_STATE.occupied_boxes;
+    if(data.box_by_bom&&data.box_by_bom[bomId]!=null){const b=LEGACY_STATE.boms.find(b=>b.bom_id===bomId);if(b)b.box_num=data.box_by_bom[bomId];}
+    legacyUpdateBoxesBar();
+  }catch(e){console.error("assignBox failed:",e.message);}
 }
 
-/* Assign a single item to a box — POST /assign with item_key */
-async function assignItemBox(itemKey, rawVal) {
-  const boxNum = parseInt(rawVal, 10);
-  if (isNaN(boxNum) || boxNum < 1) return;
-
-  try {
-    const resp = await fetch("/assign", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: STATE.job_id, moves: [{ item_key: itemKey, box_num: boxNum }] }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) {
-      console.error("Item assign error:", data.error || resp.statusText);
-      return;
-    }
-    STATE.occupied_boxes = data.occupied_boxes || STATE.occupied_boxes;
-    updateBoxesBar();
-  } catch (e) {
-    console.error("assignItemBox fetch failed:", e.message);
-  }
+async function legacyAssignItemBox(itemKey,rawVal) {
+  const boxNum=parseInt(rawVal,10); if(isNaN(boxNum)||boxNum<1)return;
+  try{
+    const resp=await fetch("/assign",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({job_id:LEGACY_STATE.job_id,moves:[{item_key:itemKey,box_num:boxNum}]})});
+    const data=await resp.json(); if(!resp.ok){console.error("Item assign error:",data.error);return;}
+    LEGACY_STATE.occupied_boxes=data.occupied_boxes||LEGACY_STATE.occupied_boxes;
+    legacyUpdateBoxesBar();
+  }catch(e){console.error("assignItemBox failed:",e.message);}
 }
 
-/* Exclude a box from the packing list, or restore it — POST /assign.
-   Used to drop a zero-on-hand box that isn't physically present (or any box
-   the user decides not to ship) before generating the master / individuals. */
-async function toggleExclude(bomId) {
-  const bom = STATE.boms.find(b => b.bom_id === bomId);
-  if (!bom) return;
-  const restoring = !!bom._excluded;
-
-  let move;
-  if (restoring) {
-    const idx    = STATE.boms.indexOf(bom);
-    const boxNum = bom.box_num != null ? bom.box_num : idx + 1;
-    move = { bom_id: bomId, box_num: boxNum };
-  } else {
-    move = { bom_id: bomId, exclude: true };
-  }
-
-  try {
-    const resp = await fetch("/assign", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: STATE.job_id, moves: [move] }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) {
-      alert("Exclude failed: " + (data.error || resp.statusText));
-      return;
-    }
-    bom._excluded = !restoring;
-    STATE.occupied_boxes = data.occupied_boxes || STATE.occupied_boxes;
-    if (data.box_by_bom && data.box_by_bom[bomId] != null) bom.box_num = data.box_by_bom[bomId];
-    renderReviewTable();
-    updateBoxesBar();
-  } catch (e) {
-    alert("Exclude fetch failed: " + e.message);
-  }
+async function legacyToggleExclude(bomId) {
+  const bom=LEGACY_STATE.boms.find(b=>b.bom_id===bomId); if(!bom)return;
+  const restoring=!!bom._excluded;
+  const move=restoring?{bom_id:bomId,box_num:bom.box_num!=null?bom.box_num:1}:{bom_id:bomId,exclude:true};
+  try{
+    const resp=await fetch("/assign",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({job_id:LEGACY_STATE.job_id,moves:[move]})});
+    const data=await resp.json(); if(!resp.ok){alert("Exclude failed: "+(data.error||resp.statusText));return;}
+    bom._excluded=!restoring;
+    LEGACY_STATE.occupied_boxes=data.occupied_boxes||LEGACY_STATE.occupied_boxes;
+    if(data.box_by_bom&&data.box_by_bom[bomId]!=null)bom.box_num=data.box_by_bom[bomId];
+    legacyRenderReviewTable(); legacyUpdateBoxesBar();
+  }catch(e){alert("Exclude failed: "+e.message);}
 }
 
-/* Auto-assign 1..N — sets each BOM row to its index+1 and pushes all via one /assign call */
-async function autoAssign() {
-  if (!STATE.boms.length) return;
-
-  /* Build moves array: one entry per BOM */
-  const moves = STATE.boms.map((bom, idx) => ({ bom_id: bom.bom_id, box_num: idx + 1 }));
-
-  /* Update inputs in the DOM immediately for responsiveness */
-  moves.forEach(m => {
-    const inp = $(`box-${m.bom_id}`);
-    if (inp) inp.value = m.box_num;
-  });
-
-  try {
-    const resp = await fetch("/assign", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: STATE.job_id, moves }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) {
-      alert("Auto-assign failed: " + (data.error || resp.statusText));
-      return;
-    }
-    STATE.occupied_boxes = data.occupied_boxes || STATE.occupied_boxes;
-
-    /* Sync local bom box_num from response */
-    if (data.box_by_bom) {
-      STATE.boms.forEach(b => {
-        if (data.box_by_bom[b.bom_id] != null) b.box_num = data.box_by_bom[b.bom_id];
-      });
-    }
-
-    updateBoxesBar();
-  } catch (e) {
-    alert("Auto-assign fetch failed: " + e.message);
-  }
+async function legacyAutoAssign() {
+  if(!LEGACY_STATE.boms.length)return;
+  const moves=LEGACY_STATE.boms.map((bom,idx)=>({bom_id:bom.bom_id,box_num:idx+1}));
+  moves.forEach(m=>{const inp=$leg(`box-${m.bom_id}`);if(inp)inp.value=m.box_num;});
+  try{
+    const resp=await fetch("/assign",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({job_id:LEGACY_STATE.job_id,moves})});
+    const data=await resp.json(); if(!resp.ok){alert("Auto-assign failed: "+(data.error||resp.statusText));return;}
+    LEGACY_STATE.occupied_boxes=data.occupied_boxes||LEGACY_STATE.occupied_boxes;
+    if(data.box_by_bom)LEGACY_STATE.boms.forEach(b=>{if(data.box_by_bom[b.bom_id]!=null)b.box_num=data.box_by_bom[b.bom_id];});
+    legacyUpdateBoxesBar();
+  }catch(e){alert("Auto-assign failed: "+e.message);}
 }
 
-/* Re-group like end items (same LIN/NIIN) into shared boxes and recount 1..N.
-   Server-side via POST /regroup so the box count is always accurate and
-   contiguous (no vacated-box gaps). Resets manual splits back to grouped. */
-async function condenseDuplicates() {
-  if (!STATE.boms.length) return;
-
-  const statusEl = $("condenseDupStatus");
-  statusEl.textContent = "Re-grouping…";
-
-  try {
-    const resp = await fetch("/regroup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: STATE.job_id }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) {
-      statusEl.textContent = "Error: " + (data.error || resp.statusText);
-      return;
-    }
-    STATE.occupied_boxes = data.occupied_boxes || STATE.occupied_boxes;
-
-    /* Sync local bom box_num from response, then re-render so grouped
-       box numbers update on every row + the items sub-tables. */
-    if (data.box_by_bom) {
-      STATE.boms.forEach(b => {
-        if (data.box_by_bom[b.bom_id] != null) b.box_num = data.box_by_bom[b.bom_id];
-      });
-    }
-    renderReviewTable();
-    updateBoxesBar();
-
-    const n = (STATE.occupied_boxes || []).length;
-    statusEl.textContent = `Re-grouped like items into ${n} box${n === 1 ? "" : "es"} (1..${n}).`;
-  } catch (e) {
-    statusEl.textContent = "Re-group failed: " + e.message;
-  }
+async function legacyCondenseDuplicates() {
+  if(!LEGACY_STATE.boms.length)return;
+  const statusEl=$leg("condenseDupStatus"); statusEl.textContent="Re-grouping…";
+  try{
+    const resp=await fetch("/regroup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({job_id:LEGACY_STATE.job_id})});
+    const data=await resp.json(); if(!resp.ok){statusEl.textContent="Error: "+(data.error||resp.statusText);return;}
+    LEGACY_STATE.occupied_boxes=data.occupied_boxes||LEGACY_STATE.occupied_boxes;
+    if(data.box_by_bom)LEGACY_STATE.boms.forEach(b=>{if(data.box_by_bom[b.bom_id]!=null)b.box_num=data.box_by_bom[b.bom_id];});
+    legacyRenderReviewTable(); legacyUpdateBoxesBar();
+    const n=(LEGACY_STATE.occupied_boxes||[]).length;
+    statusEl.textContent=`Re-grouped into ${n} box${n===1?"":"es"} (1..${n}).`;
+  }catch(e){statusEl.textContent="Re-group failed: "+e.message;}
 }
 
-/* Separate one end item out of its shared box into a new box of its own —
-   POST /assign with a 'separate' move. Used to pull a single unit out of a
-   grouped box (e.g. one M4 out of the box of 50). */
-async function separateBom(bomId) {
-  const bom = STATE.boms.find(b => b.bom_id === bomId);
-  if (!bom) return;
-  try {
-    const resp = await fetch("/assign", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: STATE.job_id, moves: [{ bom_id: bomId, separate: true }] }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) {
-      alert("Separate failed: " + (data.error || resp.statusText));
-      return;
-    }
-    STATE.occupied_boxes = data.occupied_boxes || STATE.occupied_boxes;
-    if (data.box_by_bom) {
-      STATE.boms.forEach(b => {
-        if (data.box_by_bom[b.bom_id] != null) b.box_num = data.box_by_bom[b.bom_id];
-      });
-    }
-    renderReviewTable();
-    updateBoxesBar();
-  } catch (e) {
-    alert("Separate fetch failed: " + e.message);
-  }
+async function legacySeparateBom(bomId) {
+  const bom=LEGACY_STATE.boms.find(b=>b.bom_id===bomId); if(!bom)return;
+  try{
+    const resp=await fetch("/assign",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({job_id:LEGACY_STATE.job_id,moves:[{bom_id:bomId,separate:true}]})});
+    const data=await resp.json(); if(!resp.ok){alert("Separate failed: "+(data.error||resp.statusText));return;}
+    LEGACY_STATE.occupied_boxes=data.occupied_boxes||LEGACY_STATE.occupied_boxes;
+    if(data.box_by_bom)LEGACY_STATE.boms.forEach(b=>{if(data.box_by_bom[b.bom_id]!=null)b.box_num=data.box_by_bom[b.bom_id];});
+    legacyRenderReviewTable(); legacyUpdateBoxesBar();
+  }catch(e){alert("Separate failed: "+e.message);}
 }
 
-/* ================================================================== *
- * SECTION 3/4 — HEADER + GENERATE
- * ================================================================== */
-
-/* Collect header object from form inputs. */
-function collectHeader() {
-  const packed_by = $("h_packed_by").value.trim().toUpperCase();
-
+function legacyCollectHeader() {
+  const packed_by=($leg("h_packed_by")||{}).value||"";
   return {
-    packed_by,
-    uic:         $("h_uic").value.trim().toUpperCase(),
-    battery:     $("h_battery").value.trim().toUpperCase(),
-    battalion:   $("h_battalion").value.trim().toUpperCase(),
-    shrh:        $("h_shrh").value.trim().toUpperCase(),
-    sloc:        $("h_sloc").value.trim().toUpperCase(),
-    container:   $("h_container").value.trim().toUpperCase(),
-    sun:         $("h_sun").value.trim().toUpperCase(),
-    seal:        $("h_seal").value.trim().toUpperCase(),
-    date:        $("h_date").value.trim().toUpperCase(),
-    signer_name: $("h_signer_name").value.trim().toUpperCase(),
+    packed_by, uic:($leg("h_uic")||{}).value||"", battery:($leg("h_battery")||{}).value||"",
+    battalion:($leg("h_battalion")||{}).value||"", shrh:($leg("h_shrh")||{}).value||"",
+    sloc:($leg("h_sloc")||{}).value||"", container:($leg("h_container")||{}).value||"",
+    sun:($leg("h_sun")||{}).value||"", seal:($leg("h_seal")||{}).value||"",
+    date:($leg("h_date")||{}).value||"", signer_name:($leg("h_signer_name")||{}).value||"",
   };
 }
 
-/* Shared binary download helper: fetch → blob → object URL → auto-click */
-async function downloadBinary(url, payload, filename, statusEl) {
-  statusEl.textContent = "Generating…";
-  try {
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    if (!resp.ok) {
-      let msg = resp.statusText;
-      try { msg = (await resp.json()).error || msg; } catch (_) {}
-      statusEl.textContent = "Error: " + msg;
-      return;
-    }
-
-    const blob = await resp.blob();
-    const objUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = objUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(objUrl);
-
-    statusEl.textContent = `Downloaded: ${filename}`;
-  } catch (e) {
-    statusEl.textContent = "Download error: " + e.message;
-  }
+async function legacyDownloadBinary(url,payload,filename,statusEl) {
+  statusEl.textContent="Generating…";
+  try{
+    const resp=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    if(!resp.ok){let msg=resp.statusText;try{msg=(await resp.json()).error||msg;}catch(_){}statusEl.textContent="Error: "+msg;return;}
+    const blob=await resp.blob(); const objUrl=URL.createObjectURL(blob);
+    const a=document.createElement("a"); a.href=objUrl; a.download=filename;
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(objUrl);
+    statusEl.textContent=`Downloaded: ${filename}`;
+  }catch(e){statusEl.textContent="Download error: "+e.message;}
 }
 
-/* Download individual 1750s ZIP — POST /generate-individuals
-   Includes condense flag from #condenseChk checkbox. */
-async function generateIndividuals() {
-  if (!STATE.job_id) { alert("No job loaded. Run Ingest first."); return; }
-  const header   = collectHeader();
-  const condense = $("condenseChk").checked; // merge identical lines and sum qty when true
-  const status   = $("genStatus");
-  $("genIndividualsBtn").disabled = true;
-  await downloadBinary(
-    "/generate-individuals",
-    { job_id: STATE.job_id, header, condense },
-    "Individual_1750s.zip",
-    status
-  );
-  $("genIndividualsBtn").disabled = false;
+async function legacyGenerateIndividuals() {
+  if(!LEGACY_STATE.job_id){alert("No job loaded. Run Ingest first.");return;}
+  const condense=($leg("condenseChk")||{}).checked;
+  $leg("genIndividualsBtn").disabled=true;
+  await legacyDownloadBinary("/generate-individuals",{job_id:LEGACY_STATE.job_id,header:legacyCollectHeader(),condense},"Individual_1750s.zip",$leg("genStatus"));
+  $leg("genIndividualsBtn").disabled=false;
 }
 
-/* Download master 1750 PDF — POST /generate-master
-   Includes condense flag from #condenseChk checkbox. */
-async function generateMaster() {
-  if (!STATE.job_id) { alert("No job loaded. Run Ingest first."); return; }
-  const header   = collectHeader();
-  const condense = $("condenseChk").checked; // merge identical lines and sum qty when true
-  const status   = $("genStatus");
-  $("genMasterBtn").disabled = true;
-  await downloadBinary(
-    "/generate-master",
-    { job_id: STATE.job_id, header, condense },
-    "Master_DD1750.pdf",
-    status
-  );
-  $("genMasterBtn").disabled = false;
+async function legacyGenerateMaster() {
+  if(!LEGACY_STATE.job_id){alert("No job loaded. Run Ingest first.");return;}
+  const condense=($leg("condenseChk")||{}).checked;
+  $leg("genMasterBtn").disabled=true;
+  await legacyDownloadBinary("/generate-master",{job_id:LEGACY_STATE.job_id,header:legacyCollectHeader(),condense},"Master_DD1750.pdf",$leg("genStatus"));
+  $leg("genMasterBtn").disabled=false;
 }
 
-/* ================================================================== *
- * LEGACY — unchanged helpers from original tool
- * ================================================================== */
-
-function collectLegacyHeader() {
-  return {
-    uic:         $("l_uic").value.trim(),
-    battery:     $("l_battery").value.trim(),
-    battalion:   $("l_battalion").value.trim(),
-    packed_by:   $("l_packed_by").value.trim(),
-    shrh:        $("l_shrh").value.trim(),
-    sloc:        $("l_sloc").value.trim(),
-    container:   $("l_container").value.trim(),
-    sun:         $("l_sun").value.trim(),
-    seal:        $("l_seal").value.trim(),
-    date:        $("l_date").value.trim(),
-    signer_name: $("l_signer_name").value.trim(),
-  };
-}
-
-function makeLegacyRow(data) {
-  data = data || {};
-  const tr = document.createElement("tr");
-  if (data.needs_review) tr.classList.add("needs-review");
-  const serials = Array.isArray(data.serials) ? data.serials.join(", ") : (data.serials || "");
-  tr.innerHTML = `
-    <td class="col-box"><input class="r-box" value="${data.box_num || ""}"></td>
-    <td><input class="r-model" value="${esc(data.model || "")}"></td>
-    <td><input class="r-lin" value="${esc(data.lin || "")}"></td>
-    <td><input class="r-nsn" value="${esc(data.nsn || "")}"></td>
-    <td><input class="r-serials" value="${esc(serials)}"></td>
-    <td class="col-items"><input class="r-qty" value="${data.qty != null ? data.qty : ""}"></td>
-    <td style="width:70px;text-align:center;"><button class="btn-danger r-remove">Remove</button></td>
-  `;
-  tr.querySelector(".r-remove").addEventListener("click", () => {
-    tr.remove(); legacyResequence();
-  });
+/* Legacy row editor helpers */
+function legacyMakeLegacyRow(data) {
+  data=data||{};
+  const tr=document.createElement("tr");
+  if(data.needs_review)tr.classList.add("needs-review");
+  const serials=Array.isArray(data.serials)?data.serials.join(", "):(data.serials||"");
+  tr.innerHTML=`<td class="col-box"><input class="r-box" value="${data.box_num||""}"></td>
+    <td><input class="r-model" value="${legacyEsc(data.model||"")}"></td>
+    <td><input class="r-lin" value="${legacyEsc(data.lin||"")}"></td>
+    <td><input class="r-nsn" value="${legacyEsc(data.nsn||"")}"></td>
+    <td><input class="r-serials" value="${legacyEsc(serials)}"></td>
+    <td class="col-items"><input class="r-qty" value="${data.qty!=null?data.qty:""}"></td>
+    <td style="width:70px;text-align:center;"><button class="btn-danger r-remove">Remove</button></td>`;
+  tr.querySelector(".r-remove").addEventListener("click",()=>{tr.remove();legacyResequence();});
   return tr;
 }
 
-function legacyResequence() {
-  document.querySelectorAll("#rowsBody .r-box")
-    .forEach((inp, i) => { inp.value = i + 1; });
-}
+function legacyResequence(){document.querySelectorAll("#rowsBody .r-box").forEach((inp,i)=>{inp.value=i+1;});}
 
-function renderLegacyRows(rows) {
-  const body = $("rowsBody");
-  body.innerHTML = "";
-  rows.forEach(r => body.appendChild(makeLegacyRow(r)));
-  legacyResequence();
-}
+function legacyRenderRows(rows){const body=$leg("rowsBody");body.innerHTML="";rows.forEach(r=>body.appendChild(legacyMakeLegacyRow(r)));legacyResequence();}
 
-function collectLegacyRows() {
-  const rows = [];
-  document.querySelectorAll("#rowsBody tr").forEach((tr, i) => {
-    const serialsRaw = tr.querySelector(".r-serials").value;
-    const serials = serialsRaw.split(",").map(s => s.trim()).filter(s => s.length);
-    const qtyVal = parseInt(tr.querySelector(".r-qty").value, 10);
-    rows.push({
-      box_num: i + 1,
-      model:   tr.querySelector(".r-model").value.trim(),
-      lin:     tr.querySelector(".r-lin").value.trim(),
-      nsn:     tr.querySelector(".r-nsn").value.trim(),
-      serials,
-      qty: isNaN(qtyVal) ? (serials.length || 1) : qtyVal,
-    });
+function legacyCollectRows(){
+  const rows=[];
+  document.querySelectorAll("#rowsBody tr").forEach((tr,i)=>{
+    const sr=tr.querySelector(".r-serials").value;
+    const serials=sr.split(",").map(s=>s.trim()).filter(s=>s.length);
+    const qty=parseInt(tr.querySelector(".r-qty").value,10);
+    rows.push({box_num:i+1,model:tr.querySelector(".r-model").value.trim(),lin:tr.querySelector(".r-lin").value.trim(),nsn:tr.querySelector(".r-nsn").value.trim(),serials,qty:isNaN(qty)?(serials.length||1):qty});
   });
   return rows;
 }
 
+function legacyCollectLegacyHeader(){
+  return {uic:($leg("l_uic")||{}).value||"",battery:($leg("l_battery")||{}).value||"",battalion:($leg("l_battalion")||{}).value||"",packed_by:($leg("l_packed_by")||{}).value||"",shrh:($leg("l_shrh")||{}).value||"",sloc:($leg("l_sloc")||{}).value||"",container:($leg("l_container")||{}).value||"",sun:($leg("l_sun")||{}).value||"",seal:($leg("l_seal")||{}).value||"",date:($leg("l_date")||{}).value||"",signer_name:($leg("l_signer_name")||{}).value||""};
+}
+
 async function legacyUploadFiles(fileList) {
-  if (!fileList || !fileList.length) return;
-  const fd = new FormData();
-  for (const f of fileList) fd.append("files", f);
-  $("uploadStatus").textContent = `Uploading ${fileList.length} file(s)…`;
-  try {
-    const resp = await fetch("/upload", { method: "POST", body: fd });
-    const data = await resp.json();
-    if (!resp.ok) { $("uploadStatus").textContent = "Error: " + (data.error || resp.statusText); return; }
-    renderLegacyRows(data.rows);
-    const flagged = data.rows.filter(r => r.needs_review).length;
-    $("uploadStatus").textContent = `Parsed ${data.file_count} file(s) → ${data.rows.length} row(s)` +
-      (flagged ? `, ${flagged} need review (highlighted).` : ".");
-  } catch (e) {
-    $("uploadStatus").textContent = "Upload failed: " + e.message;
-  }
+  if(!fileList||!fileList.length)return;
+  const fd=new FormData(); for(const f of fileList)fd.append("files",f);
+  $leg("uploadStatus").textContent=`Uploading ${fileList.length} file(s)…`;
+  try{
+    const resp=await fetch("/upload",{method:"POST",body:fd}); const data=await resp.json();
+    if(!resp.ok){$leg("uploadStatus").textContent="Error: "+(data.error||resp.statusText);return;}
+    legacyRenderRows(data.rows);
+    const flagged=data.rows.filter(r=>r.needs_review).length;
+    $leg("uploadStatus").textContent=`Parsed ${data.file_count} file(s) → ${data.rows.length} row(s)`+(flagged?`, ${flagged} need review.`:".");
+  }catch(e){$leg("uploadStatus").textContent="Upload failed: "+e.message;}
 }
 
 async function legacyGeneratePDF() {
-  legacyResequence();
-  const rows = collectLegacyRows();
-  if (!rows.length) { alert("No rows to generate."); return; }
-  const payload = { rows, header: collectLegacyHeader() };
-  try {
-    const resp = await fetch("/generate", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-    });
-    if (!resp.ok) {
-      let msg = resp.statusText;
-      try { msg = (await resp.json()).error || msg; } catch (_) {}
-      alert("Generate failed: " + msg);
-      return;
-    }
-    const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "Master_DD1750.pdf";
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
-  } catch (e) {
-    alert("Generate error: " + e.message);
-  }
+  legacyResequence(); const rows=legacyCollectRows(); if(!rows.length){alert("No rows to generate.");return;}
+  const payload={rows,header:legacyCollectLegacyHeader()};
+  try{
+    const resp=await fetch("/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    if(!resp.ok){let msg=resp.statusText;try{msg=(await resp.json()).error||msg;}catch(_){}alert("Generate failed: "+msg);return;}
+    const blob=await resp.blob(); const url=URL.createObjectURL(blob);
+    const a=document.createElement("a"); a.href=url; a.download="Master_DD1750.pdf";
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  }catch(e){alert("Generate error: "+e.message);}
 }
 
 async function legacyRunAudit() {
   legacyResequence();
-  const payload = { rows: collectLegacyRows(), header: collectLegacyHeader() };
-  try {
-    const resp = await fetch("/audit", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-    });
-    const data = await resp.json();
-    legacyRenderAudit(data);
-  } catch (e) {
-    alert("Audit error: " + e.message);
-  }
+  const payload={rows:legacyCollectRows(),header:legacyCollectLegacyHeader()};
+  try{
+    const resp=await fetch("/audit",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    const data=await resp.json(); legacyRenderAudit(data);
+  }catch(e){alert("Audit error: "+e.message);}
 }
 
-function legacyRenderAudit(data) {
-  $("auditPanel").style.display = "block";
-  const status = $("auditStatus");
-  status.innerHTML = data.passed
-    ? `<span class="audit-status audit-pass">PASSED</span> <span class="muted">${data.box_count} box(es).</span>`
-    : `<span class="audit-status audit-fail">FAILED</span> <span class="muted">${data.box_count} box(es).</span>`;
-  const ul = $("auditIssues");
-  ul.innerHTML = "";
-  if (!data.issues || !data.issues.length) {
-    ul.innerHTML = `<li class="muted">No issues found.</li>`; return;
-  }
-  data.issues.forEach(iss => {
-    const li = document.createElement("li");
-    li.className = "sev-" + iss.severity;
-    li.innerHTML = `<span class="badge badge-${iss.severity}">${iss.severity}</span>${esc(iss.message)}`;
-    ul.appendChild(li);
-  });
+function legacyRenderAudit(data){
+  $leg("auditPanel").style.display="block";
+  const status=$leg("auditStatus");
+  status.innerHTML=data.passed?`<span class="audit-status audit-pass">PASSED</span> <span class="muted">${data.box_count} box(es).</span>`:`<span class="audit-status audit-fail">FAILED</span> <span class="muted">${data.box_count} box(es).</span>`;
+  const ul=$leg("auditIssues"); ul.innerHTML="";
+  if(!data.issues||!data.issues.length){ul.innerHTML=`<li class="muted">No issues found.</li>`;return;}
+  data.issues.forEach(iss=>{const li=document.createElement("li");li.className="sev-"+iss.severity;li.innerHTML=`<span class="badge badge-${iss.severity}">${iss.severity}</span>${legacyEsc(iss.message)}`;ul.appendChild(li);});
 }
 
-function switchTab(tab) {
-  $("panelPdf").style.display = tab === "pdf" ? "" : "none";
-  $("panelCsv").style.display = tab === "csv" ? "" : "none";
-  $("tabPdf").classList.toggle("tab-active", tab === "pdf");
-  $("tabCsv").classList.toggle("tab-active", tab === "csv");
+function legacySwitchTab(tab){
+  $leg("panelPdf").style.display=tab==="pdf"?"":"none";
+  $leg("panelCsv").style.display=tab==="csv"?"":"none";
+  $leg("tabPdf").classList.toggle("tab-active",tab==="pdf");
+  $leg("tabCsv").classList.toggle("tab-active",tab==="csv");
 }
 
-async function legacyUploadCsv(fileList) {
-  if (!fileList || !fileList.length) return;
-  const f = fileList[0];
-  $("csvStatus").textContent = `Uploading ${f.name}…`;
-  const fd = new FormData();
-  fd.append("csv", f);
-  try {
-    const resp = await fetch("/upload-csv", { method: "POST", body: fd });
-    const data = await resp.json();
-    if (!resp.ok) { $("csvStatus").textContent = "Error: " + (data.error || resp.statusText); return; }
-    renderLegacyRows(data.rows);
-    $("csvStatus").textContent = `Parsed ${data.record_count} record(s) → ${data.rows.length} unique item(s) loaded.`;
-  } catch (e) {
-    $("csvStatus").textContent = "Upload failed: " + e.message;
-  }
+async function legacyUploadCsv(fileList){
+  if(!fileList||!fileList.length)return; const f=fileList[0];
+  $leg("csvStatus").textContent=`Uploading ${f.name}…`;
+  const fd=new FormData(); fd.append("csv",f);
+  try{
+    const resp=await fetch("/upload-csv",{method:"POST",body:fd}); const data=await resp.json();
+    if(!resp.ok){$leg("csvStatus").textContent="Error: "+(data.error||resp.statusText);return;}
+    legacyRenderRows(data.rows);
+    $leg("csvStatus").textContent=`Parsed ${data.record_count} record(s) → ${data.rows.length} unique item(s) loaded.`;
+  }catch(e){$leg("csvStatus").textContent="Upload failed: "+e.message;}
 }
 
-/* ================================================================== *
- * INIT — wire up all events on DOMContentLoaded
- * ================================================================== */
-(function init() {
-  /* Legacy drop zone / file input wiring */
-  const dz = $("dropzone");
-  const fi = $("fileInput");
-  if (dz && fi) {
-    dz.addEventListener("click", () => fi.click());
-    fi.addEventListener("change", () => legacyUploadFiles(fi.files));
-    dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("drag"); });
-    dz.addEventListener("dragleave", () => dz.classList.remove("drag"));
-    dz.addEventListener("drop", e => {
-      e.preventDefault(); dz.classList.remove("drag"); legacyUploadFiles(e.dataTransfer.files);
-    });
+/* Init legacy event bindings on DOMContentLoaded */
+document.addEventListener("DOMContentLoaded", () => {
+  const dz=$leg("dropzone"), fi=$leg("fileInput");
+  if(dz&&fi){
+    dz.addEventListener("click",()=>fi.click());
+    fi.addEventListener("change",()=>legacyUploadFiles(fi.files));
+    dz.addEventListener("dragover",e=>{e.preventDefault();dz.classList.add("drag");});
+    dz.addEventListener("dragleave",()=>dz.classList.remove("drag"));
+    dz.addEventListener("drop",e=>{e.preventDefault();dz.classList.remove("drag");legacyUploadFiles(e.dataTransfer.files);});
   }
-
-  const csvDz    = $("csvDropzone");
-  const csvInput = $("csvInput");
-  if (csvDz && csvInput) {
-    csvDz.addEventListener("click", () => csvInput.click());
-    csvInput.addEventListener("change", () => legacyUploadCsv(csvInput.files));
-    csvDz.addEventListener("dragover", e => { e.preventDefault(); csvDz.classList.add("drag"); });
-    csvDz.addEventListener("dragleave", () => csvDz.classList.remove("drag"));
-    csvDz.addEventListener("drop", e => {
-      e.preventDefault(); csvDz.classList.remove("drag"); legacyUploadCsv(e.dataTransfer.files);
-    });
+  const csvDz=$leg("csvDropzone"), csvInput=$leg("csvInput");
+  if(csvDz&&csvInput){
+    csvDz.addEventListener("click",()=>csvInput.click());
+    csvInput.addEventListener("change",()=>legacyUploadCsv(csvInput.files));
+    csvDz.addEventListener("dragover",e=>{e.preventDefault();csvDz.classList.add("drag");});
+    csvDz.addEventListener("dragleave",()=>csvDz.classList.remove("drag"));
+    csvDz.addEventListener("drop",e=>{e.preventDefault();csvDz.classList.remove("drag");legacyUploadCsv(e.dataTransfer.files);});
   }
-
-  const addRowBtn = $("addRowBtn");
-  if (addRowBtn) {
-    addRowBtn.addEventListener("click", () => {
-      $("rowsBody").appendChild(makeLegacyRow({ qty: 1 }));
-      legacyResequence();
-    });
-  }
-
-  const generateBtn = $("generateBtn");
-  if (generateBtn) generateBtn.addEventListener("click", legacyGeneratePDF);
-
-  const auditBtn = $("auditBtn");
-  if (auditBtn) auditBtn.addEventListener("click", legacyRunAudit);
-})();
+  const addRowBtn=$leg("addRowBtn");
+  if(addRowBtn)addRowBtn.addEventListener("click",()=>{$leg("rowsBody").appendChild(legacyMakeLegacyRow({qty:1}));legacyResequence();});
+  const generateBtn=$leg("generateBtn"); if(generateBtn)generateBtn.addEventListener("click",legacyGeneratePDF);
+  const auditBtn=$leg("auditBtn"); if(auditBtn)auditBtn.addEventListener("click",legacyRunAudit);
+});
 </script>
+
 </body>
 </html>

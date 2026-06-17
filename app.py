@@ -745,6 +745,512 @@ def generate_master():
     )
 
 
+# ===========================================================================
+# CONNEX-3D ROUTES — Backend agent (Wave 1)
+# All routes below are new additive routes.  They do NOT modify any existing
+# route or helper above this line.
+# ===========================================================================
+
+import profiles as _profiles
+import connex_store as _connex_store
+import sitrep as _sitrep
+
+# ---------------------------------------------------------------------------
+# Profile routes  (Contract A §Profiles)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/profiles", methods=["GET"])
+def api_list_profiles():
+    """GET /api/profiles -> {profiles: [Profile, ...]}"""
+    return jsonify({"profiles": _profiles.list_profiles()})
+
+
+@app.route("/api/profiles", methods=["POST"])
+def api_create_profile():
+    """
+    POST /api/profiles  body: {brigade, battalion, battery, uic?,
+                                default_packed_by?, default_shrh_poc?, stamp_text?,
+                                brigade_image?}
+    -> {profile: Profile}   (create or upsert by (brigade, battalion, battery))
+    """
+    data = request.get_json(silent=True) or {}
+    brigade   = (data.get("brigade") or "").strip()
+    battalion = (data.get("battalion") or "").strip()
+    battery   = (data.get("battery") or "").strip()
+
+    if not brigade or not battalion:
+        return jsonify({"error": "brigade and battalion are required.", "code": "MISSING_FIELDS"}), 400
+
+    profile = _profiles.upsert_profile(
+        brigade=brigade,
+        battalion=battalion,
+        battery=battery,
+        uic=data.get("uic", ""),
+        default_packed_by=data.get("default_packed_by", ""),
+        default_shrh_poc=data.get("default_shrh_poc", ""),
+        stamp_text=data.get("stamp_text", ""),
+        brigade_image=data.get("brigade_image", ""),
+    )
+    return jsonify({"profile": profile})
+
+
+@app.route("/api/profiles/<profile_id>", methods=["GET"])
+def api_get_profile(profile_id):
+    """GET /api/profiles/<profile_id> -> {profile: Profile}"""
+    profile = _profiles.load_profile(profile_id)
+    if profile is None:
+        return jsonify({"error": f"Profile '{profile_id}' not found.", "code": "NOT_FOUND"}), 404
+    return jsonify({"profile": profile})
+
+
+# ---------------------------------------------------------------------------
+# Connex lifecycle routes  (Contract A §Connex lifecycle)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/connex", methods=["POST"])
+def api_create_connex():
+    """
+    POST /api/connex  body: {profile_id, box_count, connex_no?}
+    -> {connex: Connex}   status="building", boxes pre-spawned 1..N
+    """
+    data = request.get_json(silent=True) or {}
+    profile_id = data.get("profile_id", "")
+    box_count  = data.get("box_count")
+
+    if not profile_id:
+        return jsonify({"error": "profile_id is required.", "code": "MISSING_FIELDS"}), 400
+    if not isinstance(box_count, int) or box_count < 1:
+        return jsonify({"error": "box_count must be a positive integer.", "code": "INVALID_BOX_COUNT"}), 400
+    if _profiles.load_profile(profile_id) is None:
+        return jsonify({"error": f"Profile '{profile_id}' not found.", "code": "NOT_FOUND"}), 404
+
+    connex = _connex_store.create_connex(
+        profile_id=profile_id,
+        box_count=box_count,
+        connex_no=data.get("connex_no", ""),
+    )
+    _profiles.touch_last_used(profile_id)
+    return jsonify({"connex": connex})
+
+
+@app.route("/api/connex/<connex_id>", methods=["GET"])
+def api_get_connex(connex_id):
+    """GET /api/connex/<connex_id> -> {connex: Connex}"""
+    connex = _connex_store.load_connex(connex_id)
+    if connex is None:
+        return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
+    return jsonify({"connex": connex})
+
+
+@app.route("/api/connex/<connex_id>", methods=["PUT"])
+def api_update_connex(connex_id):
+    """
+    PUT /api/connex/<connex_id>  body: partial Connex
+    (boxes[].sloc, boxes[].shrh_poc, boxes[].individual_items,
+     sun, connex_no, seal_no, packed_by, signed_by, date)
+    -> {connex: Connex}
+    """
+    data = request.get_json(silent=True) or {}
+    connex = _connex_store.patch_connex(connex_id, data)
+    if connex is None:
+        return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
+    return jsonify({"connex": connex})
+
+
+@app.route("/api/connex/<connex_id>/attach", methods=["POST"])
+def api_attach_connex(connex_id):
+    """
+    POST /api/connex/<connex_id>/attach  body: {ingest_job_id}
+    -> {connex: Connex}
+    """
+    data = request.get_json(silent=True) or {}
+    ingest_job_id = data.get("ingest_job_id", "")
+    if not ingest_job_id:
+        return jsonify({"error": "ingest_job_id is required.", "code": "MISSING_FIELDS"}), 400
+    if ingest_job_id not in JOBS:
+        return jsonify({"error": f"Job '{ingest_job_id}' not found.", "code": "NOT_FOUND"}), 404
+
+    connex = _connex_store.attach_ingest_job(connex_id, ingest_job_id)
+    if connex is None:
+        return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
+    return jsonify({"connex": connex})
+
+
+@app.route("/api/connex/<connex_id>/assign", methods=["POST"])
+def api_assign_connex(connex_id):
+    """
+    POST /api/connex/<connex_id>/assign
+    body: {moves: [{bom_id, box_num} | {bom_id, separate:true} | {bom_id, exclude:true}]}
+
+    Wraps the existing packing.reassign / separate / exclude logic.
+    Reflects the new box→BOM mapping back into the connex JSON.
+    -> {connex: Connex}
+    """
+    connex = _connex_store.load_connex(connex_id)
+    if connex is None:
+        return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
+
+    ingest_job_id = connex.get("ingest_job_id")
+    if not ingest_job_id or ingest_job_id not in JOBS:
+        return jsonify({
+            "error": "This connex has no attached ingest job. Call /attach first.",
+            "code": "NO_JOB",
+        }), 400
+
+    data = request.get_json(silent=True) or {}
+    job  = JOBS[ingest_job_id]
+    boms = job["boms"]
+    box_map = job["box_map"]
+    box_count = connex.get("box_count", len(connex.get("boxes", [])))
+
+    warnings: list[str] = []
+
+    for move in data.get("moves", []):
+        bom_id = move.get("bom_id")
+        bom = next((b for b in boms if b["bom_id"] == bom_id), None)
+
+        if bom is None:
+            warnings.append(
+                f"bom_id {bom_id!r} not found in attached job — skipped"
+            )
+            continue
+
+        if move.get("exclude"):
+            box_map = dict(box_map)
+            for item in bom.get("items", []):
+                box_map.pop(packing.item_key(bom_id, item["line_no"]), None)
+            continue
+
+        if move.get("separate"):
+            occ = packing.occupied_boxes(box_map)
+            new_box = (max(occ) + 1) if occ else 1
+            for item in bom.get("items", []):
+                key = packing.item_key(bom_id, item["line_no"])
+                box_map = packing.reassign(box_map, key, new_box)
+            continue
+
+        target_box = move.get("box_num")
+        if target_box is None:
+            continue
+        target_box = int(target_box)
+
+        # Warn if the target box number is outside the connex range.
+        if target_box < 1 or target_box > box_count:
+            warnings.append(
+                f"bom_id {bom_id!r} targets box {target_box} which is out of range "
+                f"(connex has {box_count} boxes) — skipped"
+            )
+            continue
+
+        for item in bom.get("items", []):
+            key = packing.item_key(bom_id, item["line_no"])
+            box_map = packing.reassign(box_map, key, target_box)
+
+    # Persist updated box_map back into the in-memory job.
+    job["box_map"] = box_map
+
+    # Build bom_ids_by_box: {box_num: [bom_id, ...]}
+    bom_ids_by_box: dict[int, list[str]] = {}
+    for bom in boms:
+        rep = _representative_box(bom, box_map)
+        if rep is not None:
+            bom_ids_by_box.setdefault(rep, []).append(bom["bom_id"])
+
+    updated = _connex_store.apply_bom_assignments(connex_id, bom_ids_by_box)
+    if updated is None:
+        return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
+    return jsonify({"connex": updated, "warnings": warnings})
+
+
+@app.route("/api/connex/<connex_id>/seal", methods=["POST"])
+def api_seal_connex(connex_id):
+    """
+    POST /api/connex/<connex_id>/seal
+    -> {ok: bool, errors: [str], connex: Connex}
+
+    Validates Contract B rules.  Returns 200 in all cases (including validation
+    failures) so the UI can surface field-level guidance without an HTTP error.
+    """
+    result = _connex_store.seal_connex(connex_id)
+    if result["connex"] is None:
+        return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
+    return jsonify(result)
+
+
+@app.route("/api/connex/<connex_id>/generate", methods=["POST"])
+def api_generate_connex(connex_id):
+    """
+    POST /api/connex/<connex_id>/generate
+    -> binary ZIP containing:
+       - Master_1750.pdf — single master DD1750 listing all boxes' contents
+       - Box_001.pdf, Box_002.pdf, ... — one stamped DD1750 per occupied box
+
+    Works with and without an attached ingest job.  Content comes from two sources:
+      1. BOM items (when an ingest job is attached) via packing.items_for_box.
+      2. individual_items stored on each box dict.
+    A box is skipped only when it has no content from either source.
+    """
+    connex = _connex_store.load_connex(connex_id)
+    if connex is None:
+        return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
+
+    # Load BOM data from an attached job when present; not required.
+    ingest_job_id = connex.get("ingest_job_id")
+    job = JOBS.get(ingest_job_id) if ingest_job_id else None
+    boms    = job["boms"]    if job else []
+    box_map = job["box_map"] if job else {}
+
+    # Load the profile for stamp + header defaults.
+    profile = _profiles.load_profile(connex.get("profile_id", "")) or {}
+
+    zip_buffer = io.BytesIO()
+    rendered_boxes = 0
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+
+            # ----------------------------------------------------------------
+            # Master 1750 — one row per occupied box, both BOM + individual sources
+            # ----------------------------------------------------------------
+
+            # BOM-sourced master rows (packing engine, same as /generate-master).
+            master_rows = packing.boxes_to_master_rows(boms, box_map) if boms and box_map else []
+
+            # Synthetic master rows for individual_items.  One row per non-blank
+            # item, keyed to its box_num so the BOX NO. column is populated.
+            for box in connex.get("boxes", []):
+                box_num = box["box_num"]
+                for item in box.get("individual_items", []):
+                    desc = (item.get("description") or "").strip()
+                    if not desc:
+                        continue
+                    master_rows.append({
+                        "box_num": box_num,
+                        "model":   desc,
+                        "lin":     (item.get("lin") or "").strip(),
+                        "nsn":     (item.get("nsn") or "").strip(),
+                        "serials": [(item.get("sn") or "").strip()] if (item.get("sn") or "").strip() else [],
+                        "qty":     1,
+                    })
+
+            if master_rows:
+                # condense collapses identical end-items across boxes; re-sequences 1..N.
+                condensed = master_core.condense_master_rows(master_rows)
+                master_bom_items = master_core.rows_to_bom_items(condensed)
+
+                # Use a synthetic "all-boxes" header: sloc/shrh blank on the master
+                # (it spans all boxes), stamp from the profile.
+                master_hdr = render_core.build_connex_header(
+                    connex,
+                    {},                         # no single box — master spans all
+                    connex.get("box_count", 1),
+                    "ALL",                      # box_nums_label for the master
+                    profile or None,
+                )
+
+                master_fd, master_path = tempfile.mkstemp(suffix=".pdf", dir=tmpdir)
+                os.close(master_fd)
+                render_core.generate_dd1750_from_items(
+                    master_bom_items,
+                    TEMPLATE_PDF,
+                    master_path,
+                    header=master_hdr,
+                    draw_master_header_fn=render_core.draw_master_header,
+                )
+                with open(master_path, "rb") as fh:
+                    zf.writestr("Master_1750.pdf", fh.read())
+
+            # ----------------------------------------------------------------
+            # Per-box DD1750s — one stamped PDF per occupied box
+            # ----------------------------------------------------------------
+
+            for box in connex.get("boxes", []):
+                box_num = box["box_num"]
+                bom_items = []
+                line_seq = 1  # re-sequence line numbers across both sources
+
+                # Source 1: BOM component items from the ingest job.
+                if boms and box_map:
+                    for it in packing.items_for_box(boms, box_map, box_num):
+                        nsn_str = it.get("nsn", "") or ""
+                        sn = (it.get("serial_number") or "").strip()
+                        if sn:
+                            nsn_str = (nsn_str + "  SN: " + sn).strip() if nsn_str else "SN: " + sn
+                        bom_items.append(render_core.BomItem(
+                            line_no=line_seq,
+                            description=it.get("description", ""),
+                            nsn=nsn_str,
+                            qty=it.get("qty", 1),
+                            unit_of_issue=it.get("unit_of_issue", "EA"),
+                        ))
+                        line_seq += 1
+
+                # Source 2: individual items on the box.
+                for item in box.get("individual_items", []):
+                    desc = (item.get("description") or "").strip()
+                    if not desc:
+                        continue  # skip blank placeholder rows from the UI
+                    nsn_str = (item.get("nsn") or "").strip()
+                    lin_str = (item.get("lin") or "").strip()
+                    sn_str  = (item.get("sn")  or "").strip()
+                    parts = []
+                    if nsn_str:
+                        parts.append(nsn_str)
+                    if lin_str:
+                        parts.append(f"LIN: {lin_str}")
+                    if sn_str:
+                        parts.append(f"SN: {sn_str}")
+                    bom_items.append(render_core.BomItem(
+                        line_no=line_seq,
+                        description=desc,
+                        nsn="  ".join(parts),
+                        qty=1,
+                        unit_of_issue="EA",
+                    ))
+                    line_seq += 1
+
+                if not bom_items:
+                    continue  # empty box — skip
+
+                # build_connex_header injects bracketed placeholders for blank
+                # sun/connex_no/seal_no and populates stamp_text from the profile.
+                hdr = render_core.build_connex_header(
+                    connex,
+                    box,
+                    connex.get("box_count", 1),
+                    str(box_num),
+                    profile or None,
+                )
+
+                out_fd, out_path = tempfile.mkstemp(suffix=".pdf", dir=tmpdir)
+                os.close(out_fd)
+                render_core.generate_dd1750_from_items(
+                    bom_items,
+                    TEMPLATE_PDF,
+                    out_path,
+                    header=hdr,
+                    draw_master_header_fn=render_core.draw_master_header,
+                )
+
+                with open(out_path, "rb") as fh:
+                    zf.writestr(f"Box_{box_num:03d}.pdf", fh.read())
+                rendered_boxes += 1
+
+    if rendered_boxes == 0 and not master_rows:
+        return jsonify({"error": "No occupied boxes to render.", "code": "EMPTY_CONNEX"}), 400
+
+    zip_buffer.seek(0)
+    connex_label = re.sub(r'[^\w\-]', '_', connex.get("connex_no") or connex_id)[:40]
+    return send_file(
+        zip_buffer,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"Connex_{connex_label}_DD1750s.zip",
+    )
+
+
+# ---------------------------------------------------------------------------
+# SITREP routes  (Contract A §SITREP, Contract C)
+# ---------------------------------------------------------------------------
+
+def _resolve_connexes_for_sitrep(data: dict) -> tuple[list[dict], dict | None]:
+    """
+    Resolve the connex list + profile from request body.
+
+    Accepts {connex_ids: [...]} OR {profile_id: "..."}.
+    Returns (connexes, profile_dict_or_None).
+
+    Uses connex_store.load_connex for all file I/O — avoids importing json
+    directly in this module and keeps error handling consistent.
+    """
+    connex_ids = data.get("connex_ids")
+    profile_id = data.get("profile_id")
+    profile = None
+
+    if connex_ids:
+        connexes = [c for c in (_connex_store.load_connex(cid) for cid in connex_ids) if c]
+        if connexes:
+            pid = connexes[0].get("profile_id")
+            if pid:
+                profile = _profiles.load_profile(pid)
+    elif profile_id:
+        profile = _profiles.load_profile(profile_id)
+        connexes = []
+        if os.path.isdir(_connex_store.CONNEXES_DIR):
+            for fname in os.listdir(_connex_store.CONNEXES_DIR):
+                if not fname.endswith(".json"):
+                    continue
+                # Derive connex_id from filename (strip .json suffix) and
+                # load through the store so all I/O is in one place.
+                cid = fname[:-5]
+                cx = _connex_store.load_connex(cid)
+                if cx and cx.get("profile_id") == profile_id:
+                    connexes.append(cx)
+    else:
+        connexes = []
+
+    return connexes, profile
+
+
+@app.route("/api/sitrep", methods=["POST"])
+def api_sitrep():
+    """
+    POST /api/sitrep  body: {connex_ids:[...]} OR {profile_id}
+    -> {sitrep: Sitrep}
+    """
+    data = request.get_json(silent=True) or {}
+    connexes, profile = _resolve_connexes_for_sitrep(data)
+
+    # Enrich BOM nomenclature from in-memory job data where available.
+    boms_by_id: dict[str, dict] = {}
+    for cx in connexes:
+        jid = cx.get("ingest_job_id")
+        if jid and jid in JOBS:
+            for bom in JOBS[jid].get("boms", []):
+                boms_by_id[bom["bom_id"]] = bom
+
+    sitrep = _sitrep.build_sitrep(connexes, profile=profile)
+    if boms_by_id:
+        sitrep = _sitrep.enrich_sitrep_boms(sitrep, boms_by_id)
+
+    return jsonify({"sitrep": sitrep})
+
+
+@app.route("/api/sitrep/pdf", methods=["POST"])
+def api_sitrep_pdf():
+    """
+    POST /api/sitrep/pdf  body: same as /api/sitrep
+    -> binary PDF
+
+    Delegates to sitrep_render.render_sitrep_pdf(sitrep_dict) which returns
+    raw PDF bytes when called without output_path.
+    """
+    import sitrep_render
+
+    data = request.get_json(silent=True) or {}
+    connexes, profile = _resolve_connexes_for_sitrep(data)
+
+    boms_by_id: dict[str, dict] = {}
+    for cx in connexes:
+        jid = cx.get("ingest_job_id")
+        if jid and jid in JOBS:
+            for bom in JOBS[jid].get("boms", []):
+                boms_by_id[bom["bom_id"]] = bom
+
+    sitrep = _sitrep.build_sitrep(connexes, profile=profile)
+    if boms_by_id:
+        sitrep = _sitrep.enrich_sitrep_boms(sitrep, boms_by_id)
+
+    pdf_bytes = sitrep_render.render_sitrep_pdf(sitrep)
+
+    from flask import Response
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=sitrep.pdf"},
+    )
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port, debug=False)

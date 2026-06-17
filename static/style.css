@@ -1,7 +1,1030 @@
-/* style.css — intentionally minimal.
+/* style.css — CONNEX 1750 Component Library
+ * Owned by: UI Design agent
+ * Depends on: tokens.css (must be loaded first)
+ * Consumers: Frontend (HTML), _styleguide.html (QA)
+ * Last updated: 2026-06-17
  *
- * All styling is inlined in templates/index.html (CSS variables mirror v25:
- * --primary #1a365d, --accent #3182ce, --success #38a169, --warning #d69e2e,
- * --danger #e53e3e, --bg #f7fafc, --card #fff, --border #e2e8f0).
- * This file exists so static/ is non-empty and ready for future shared styles.
+ * NOTE: no backdrop-filter anywhere in this file.
+ * Solid RGBA surfaces only — reliable on government/enterprise networks,
+ * older browsers, and safe with the WebGL 3D canvas.
+ *
+ * Component index:
+ *   .cx-panel          glass card container
+ *   .cx-panel-2        raised glass (nested surfaces)
+ *   .cx-btn            base button
+ *   .cx-btn--primary   gold-fill CTA
+ *   .cx-btn--ghost     transparent outline button
+ *   .cx-btn--danger    destructive action
+ *   .cx-field          text input
+ *   .cx-field--mono    monospaced input (UIC, NSN, LIN, NIIN, serials)
+ *   .cx-label          input label
+ *   .cx-badge          status pill base
+ *   .cx-badge--ok      box complete
+ *   .cx-badge--warn    needs attention
+ *   .cx-badge--empty   empty / inactive
+ *   .cx-badge--danger  validation error
+ *   .cx-stepper        workflow progress (steps 1–8)
+ *   .cx-banner         brigade/battalion identity banner
+ *   .cx-help           ? popover affordance
+ *   .cx-stamp          battalion stamp visual
+ *   .cx-bom-card       draggable BOM card
  */
+
+/* ═══════════════════════════════════════════════════════════
+   BASE RESET & BODY
+   ═══════════════════════════════════════════════════════════ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  background-color: var(--connex-black);
+  color: var(--connex-gray);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Respect user motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   .cx-panel — GLASS CARD CONTAINER
+   ═══════════════════════════════════════════════════════════ */
+
+.cx-panel {
+  background: var(--connex-panel);
+  border: 1px solid var(--connex-stroke);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  box-shadow: var(--shadow-gold);
+}
+
+.cx-panel--2 {
+  background: var(--connex-panel-2);
+  border: 1px solid var(--connex-stroke);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-md);
+}
+
+.cx-panel__title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--connex-gold);
+  margin: 0 0 var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--connex-stroke);
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   .cx-btn — BUTTONS
+   ═══════════════════════════════════════════════════════════ */
+
+.cx-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 44px;                          /* touch target minimum */
+  padding: 10px var(--space-4);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1;
+  border: 1px solid var(--connex-stroke);
+  border-radius: var(--radius-sm);
+  background: var(--connex-panel);
+  color: var(--connex-gray);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background var(--transition-fast),
+              border-color var(--transition-fast),
+              color var(--transition-fast),
+              box-shadow var(--transition-fast);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.cx-btn:hover {
+  background: var(--connex-panel-2);
+  border-color: rgba(212, 191, 145, 0.35);
+  color: #fff;
+}
+
+.cx-btn:focus-visible {
+  outline: 2px solid var(--connex-gold);
+  outline-offset: 2px;
+}
+
+.cx-btn:active {
+  transform: translateY(1px);
+}
+
+.cx-btn:disabled,
+.cx-btn[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Primary — gold fill */
+.cx-btn--primary {
+  background: var(--connex-gold);
+  color: var(--connex-black);
+  border-color: var(--connex-gold);
+  font-weight: 600;
+}
+
+.cx-btn--primary:hover {
+  background: #e2d0a4;
+  border-color: #e2d0a4;
+  color: var(--connex-black);
+  box-shadow: 0 4px 16px rgba(212, 191, 145, 0.3);
+}
+
+/* Ghost — transparent with gold stroke */
+.cx-btn--ghost {
+  background: transparent;
+  border-color: var(--connex-stroke);
+  color: var(--connex-gold);
+}
+
+.cx-btn--ghost:hover {
+  background: rgba(212, 191, 145, 0.08);
+  border-color: var(--connex-gold);
+}
+
+/* Danger */
+.cx-btn--danger {
+  background: transparent;
+  border-color: rgba(229, 103, 90, 0.4);
+  color: var(--connex-danger);
+}
+
+.cx-btn--danger:hover {
+  background: rgba(229, 103, 90, 0.12);
+  border-color: var(--connex-danger);
+}
+
+/* Small variant */
+.cx-btn--sm {
+  min-height: 32px;
+  padding: 6px var(--space-3);
+  font-size: var(--text-xs);
+}
+
+/* Loading state */
+.cx-btn--loading {
+  position: relative;
+  pointer-events: none;
+  color: transparent;
+}
+
+.cx-btn--loading::after {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: cx-spin 0.6s linear infinite;
+}
+
+@keyframes cx-spin {
+  to { transform: rotate(360deg); }
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   .cx-field + .cx-label — FORM INPUTS
+   ═══════════════════════════════════════════════════════════ */
+
+.cx-field-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.cx-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--connex-gold);
+}
+
+.cx-label .cx-help {
+  /* help trigger inside a label keeps label layout */
+  flex-shrink: 0;
+}
+
+.cx-field {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px var(--space-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: #fff;
+  background: rgba(14, 15, 17, 0.6);
+  border: 1px solid var(--connex-stroke-2);
+  border-radius: var(--radius-sm);
+  transition: border-color var(--transition-fast),
+              box-shadow var(--transition-fast);
+  outline: none;
+  appearance: none;
+}
+
+.cx-field::placeholder {
+  color: var(--connex-empty);
+}
+
+.cx-field:focus {
+  border-color: var(--connex-gold);
+  box-shadow: 0 0 0 3px rgba(212, 191, 145, 0.15);
+}
+
+.cx-field--error {
+  border-color: var(--connex-danger);
+}
+
+.cx-field--error:focus {
+  box-shadow: 0 0 0 3px rgba(229, 103, 90, 0.15);
+}
+
+/* Mono variant — UIC, NSN, LIN, NIIN, serial numbers, connex/SUN/SEAL IDs */
+.cx-field--mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+}
+
+.cx-field-hint {
+  font-size: var(--text-xs);
+  color: var(--connex-empty);
+  margin-top: 2px;
+}
+
+.cx-field-error-msg {
+  font-size: var(--text-xs);
+  color: var(--connex-danger);
+  margin-top: 2px;
+}
+
+/* Textarea variant */
+.cx-field[rows],
+textarea.cx-field {
+  min-height: 80px;
+  resize: vertical;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   .cx-badge — STATUS PILLS
+   ═══════════════════════════════════════════════════════════ */
+
+.cx-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 100px;
+  border: 1px solid;
+  line-height: 1.4;
+}
+
+/* Dot indicator */
+.cx-badge::before {
+  content: '';
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+/* Box complete */
+.cx-badge--ok {
+  color: var(--connex-ok);
+  border-color: rgba(111, 207, 151, 0.3);
+  background: rgba(111, 207, 151, 0.08);
+}
+
+/* Needs attention */
+.cx-badge--warn {
+  color: var(--connex-warn);
+  border-color: rgba(224, 179, 65, 0.3);
+  background: rgba(224, 179, 65, 0.08);
+}
+
+/* Empty / inactive */
+.cx-badge--empty {
+  color: var(--connex-empty);
+  border-color: rgba(90, 94, 99, 0.4);
+  background: rgba(90, 94, 99, 0.1);
+}
+
+/* Danger / error */
+.cx-badge--danger {
+  color: var(--connex-danger);
+  border-color: rgba(229, 103, 90, 0.3);
+  background: rgba(229, 103, 90, 0.08);
+}
+
+/* Selected — gold ring (matches 3D selection ring) */
+.cx-badge--selected {
+  color: var(--connex-gold);
+  border-color: rgba(212, 191, 145, 0.45);
+  background: rgba(212, 191, 145, 0.1);
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   .cx-stepper — WORKFLOW PROGRESS (steps 1–8)
+   ═══════════════════════════════════════════════════════════ */
+
+.cx-stepper {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  list-style: none;
+  margin: 0;
+}
+
+.cx-stepper__item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  position: relative;
+  padding-bottom: var(--space-4);
+}
+
+/* Connector line between steps */
+.cx-stepper__item:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 13px;
+  top: 28px;
+  bottom: 0;
+  width: 1px;
+  background: var(--connex-stroke-2);
+}
+
+.cx-stepper__item--active::after,
+.cx-stepper__item--done::after {
+  background: rgba(212, 191, 145, 0.25);
+}
+
+.cx-stepper__dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+  border: 1px solid var(--connex-stroke-2);
+  background: rgba(14, 15, 17, 0.8);
+  color: var(--connex-empty);
+  transition: all var(--transition-base);
+  position: relative;
+  z-index: 1;
+}
+
+.cx-stepper__item--done .cx-stepper__dot {
+  background: rgba(111, 207, 151, 0.15);
+  border-color: var(--connex-ok);
+  color: var(--connex-ok);
+}
+
+.cx-stepper__item--active .cx-stepper__dot {
+  background: rgba(212, 191, 145, 0.15);
+  border-color: var(--connex-gold);
+  color: var(--connex-gold);
+  box-shadow: 0 0 0 3px rgba(212, 191, 145, 0.12);
+}
+
+.cx-stepper__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 4px;
+}
+
+.cx-stepper__label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--connex-empty);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  transition: color var(--transition-fast);
+}
+
+.cx-stepper__item--active .cx-stepper__label {
+  color: var(--connex-gold);
+}
+
+.cx-stepper__item--done .cx-stepper__label {
+  color: var(--connex-ok);
+}
+
+.cx-stepper__sublabel {
+  font-size: var(--text-xs);
+  color: var(--connex-empty);
+  opacity: 0.7;
+}
+
+.cx-stepper__item--active .cx-stepper__sublabel {
+  color: var(--connex-gray);
+  opacity: 1;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   .cx-banner — BRIGADE/BATTALION IDENTITY
+   ═══════════════════════════════════════════════════════════ */
+
+.cx-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: rgba(212, 191, 145, 0.06);
+  border: 1px solid var(--connex-stroke);
+  border-radius: var(--radius-md);
+}
+
+.cx-banner__emblem {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(212, 191, 145, 0.1);
+  border: 1px solid var(--connex-stroke);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  font-size: 18px;
+  /* SVG or text emblem goes here */
+}
+
+.cx-banner__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cx-banner__unit {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--connex-gold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cx-banner__sub {
+  font-size: var(--text-xs);
+  color: var(--connex-gray);
+  opacity: 0.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   .cx-help — ? GLOSSARY POPOVER
+   ═══════════════════════════════════════════════════════════ */
+
+/* Trigger button */
+.cx-help {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cx-help__trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid rgba(212, 191, 145, 0.4);
+  background: rgba(212, 191, 145, 0.08);
+  color: var(--connex-gold);
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  line-height: 1;
+  transition: background var(--transition-fast),
+              border-color var(--transition-fast);
+  /* Make it a real button for a11y */
+  appearance: none;
+  padding: 0;
+  vertical-align: middle;
+}
+
+.cx-help__trigger:hover {
+  background: rgba(212, 191, 145, 0.18);
+  border-color: var(--connex-gold);
+}
+
+.cx-help__trigger:focus-visible {
+  outline: 2px solid var(--connex-gold);
+  outline-offset: 2px;
+}
+
+/* Popover */
+.cx-help__popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-popover);
+  width: 240px;
+  padding: var(--space-3);
+  background: var(--connex-panel-2);
+  border: 1px solid var(--connex-stroke);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  /* typography */
+  font-size: var(--text-xs);
+  font-family: var(--font-ui);
+  line-height: 1.5;
+  color: var(--connex-gray);
+  /* hidden by default */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-fast);
+}
+
+/* Popover term header */
+.cx-help__term {
+  display: block;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--connex-gold);
+  margin-bottom: var(--space-1);
+}
+
+/* Arrow */
+.cx-help__popover::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--connex-stroke);
+}
+
+/* Open state (toggled by JS or :has() sibling) */
+.cx-help--open .cx-help__popover,
+.cx-help__popover[data-open] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Edge case: popover near right edge flips left */
+.cx-help--flip-left .cx-help__popover {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+.cx-help--flip-left .cx-help__popover::after {
+  left: auto;
+  right: 8px;
+  transform: none;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   .cx-stamp — BATTALION STAMP VISUAL
+   Matches aesthetic of the 3D door decal (applyStamp())
+   ═══════════════════════════════════════════════════════════ */
+
+.cx-stamp {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: var(--space-3) var(--space-4);
+  /* double border gives stencil feel */
+  border: 2px solid var(--connex-gold);
+  outline: 1px solid rgba(212, 191, 145, 0.3);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
+  background: rgba(212, 191, 145, 0.04);
+  /* ink-stamp texture via opacity */
+  opacity: 0.88;
+  position: relative;
+}
+
+/* The inner rule lines */
+.cx-stamp::before,
+.cx-stamp::after {
+  content: '';
+  position: absolute;
+  left: var(--space-2);
+  right: var(--space-2);
+  height: 1px;
+  background: rgba(212, 191, 145, 0.35);
+}
+
+.cx-stamp::before { top: 28px; }
+.cx-stamp::after  { bottom: 28px; }
+
+.cx-stamp__top {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--connex-gold);
+}
+
+.cx-stamp__main {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--connex-gold);
+  text-align: center;
+}
+
+.cx-stamp__sub {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(212, 191, 145, 0.65);
+}
+
+/* Rotated / angled stamp for decorative use */
+.cx-stamp--rotated {
+  transform: rotate(-8deg);
+}
+
+/* Ink-worn fade variant */
+.cx-stamp--worn {
+  opacity: 0.55;
+  filter: url(#cx-worn); /* SVG filter for rougher edges if needed */
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   .cx-bom-card — DRAGGABLE BOM CARD
+   ═══════════════════════════════════════════════════════════ */
+
+.cx-bom-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--connex-panel);
+  border: 1px solid var(--connex-stroke-2);
+  border-radius: var(--radius-md);
+  cursor: grab;
+  transition: border-color var(--transition-fast),
+              box-shadow var(--transition-fast),
+              transform var(--transition-fast);
+  user-select: none;
+}
+
+.cx-bom-card:hover {
+  border-color: rgba(212, 191, 145, 0.3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.cx-bom-card:active,
+.cx-bom-card[dragging] {
+  cursor: grabbing;
+  transform: scale(1.02);
+  border-color: var(--connex-gold);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--connex-gold);
+  opacity: 0.92;
+}
+
+/* Drag-over drop target highlight (applied by Frontend via highlightBox) */
+.cx-bom-card--drop-target {
+  border-color: var(--connex-ok);
+  box-shadow: 0 0 0 2px rgba(111, 207, 151, 0.3);
+}
+
+.cx-bom-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.cx-bom-card__nom {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: #fff;
+  line-height: 1.4;
+  /* truncate long nomenclatures */
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.cx-bom-card__qty {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--connex-gold);
+  flex-shrink: 0;
+  padding: 2px 6px;
+  background: rgba(212, 191, 145, 0.1);
+  border-radius: var(--radius-sm);
+}
+
+.cx-bom-card__codes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.cx-bom-card__code {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--connex-gray);
+  background: rgba(178, 180, 179, 0.07);
+  border: 1px solid rgba(178, 180, 179, 0.12);
+  border-radius: 4px;
+  padding: 1px 5px;
+  letter-spacing: 0.04em;
+}
+
+.cx-bom-card__code--lin  { color: #8BB4CF; border-color: rgba(139, 180, 207, 0.25); }
+.cx-bom-card__code--nsn  { color: #B4CF8B; border-color: rgba(180, 207, 139, 0.25); }
+.cx-bom-card__code--sn   { color: var(--connex-gray); }
+
+.cx-bom-card__assign {
+  /* Which box this card is currently in */
+  font-size: 10px;
+  color: var(--connex-empty);
+}
+
+.cx-bom-card--assigned {
+  border-left: 3px solid var(--connex-ok);
+}
+
+.cx-bom-card--warn {
+  border-left: 3px solid var(--connex-warn);
+}
+
+/* Ghost placeholder while dragging */
+.cx-bom-card--ghost {
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   LAYOUT SHELL (consumed by Frontend's HTML)
+   ═══════════════════════════════════════════════════════════ */
+
+/* 3-column command-center layout */
+.cx-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr 320px;
+  grid-template-rows: 100vh;
+  overflow: hidden;
+  background: var(--connex-black);
+}
+
+/* Left rail — stepper + banner */
+.cx-rail-left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6) var(--space-4);
+  background: var(--connex-panel);
+  border-right: 1px solid var(--connex-stroke);
+  overflow-y: auto;
+}
+
+/* Center — 3D canvas + toggle */
+.cx-center {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.cx-canvas-area {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.cx-canvas-area canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Right rail / drawer — context panel */
+.cx-rail-right {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6) var(--space-4);
+  background: var(--connex-panel);
+  border-left: 1px solid var(--connex-stroke);
+  overflow-y: auto;
+}
+
+/* View toggle (3D / table) */
+.cx-view-toggle {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: rgba(14, 15, 17, 0.6);
+  border: 1px solid var(--connex-stroke);
+  border-radius: var(--radius-sm);
+}
+
+.cx-view-toggle__btn {
+  flex: 1;
+  padding: 6px var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: none;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  color: var(--connex-empty);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.cx-view-toggle__btn--active {
+  background: var(--connex-panel-2);
+  color: var(--connex-gold);
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   UTILITY CLASSES
+   ═══════════════════════════════════════════════════════════ */
+
+/* Scrollbars — dark themed */
+.cx-rail-left::-webkit-scrollbar,
+.cx-rail-right::-webkit-scrollbar { width: 4px; }
+.cx-rail-left::-webkit-scrollbar-track,
+.cx-rail-right::-webkit-scrollbar-track { background: transparent; }
+.cx-rail-left::-webkit-scrollbar-thumb,
+.cx-rail-right::-webkit-scrollbar-thumb {
+  background: rgba(212, 191, 145, 0.2);
+  border-radius: 2px;
+}
+
+/* Divider */
+.cx-divider {
+  height: 1px;
+  background: var(--connex-stroke-2);
+  border: none;
+  margin: var(--space-2) 0;
+}
+
+/* Section title inside a rail */
+.cx-section-title {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--connex-gold);
+  opacity: 0.7;
+}
+
+/* Mono data display (read-only code values) */
+.cx-mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+}
+
+/* Validation error banner below form */
+.cx-error-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: rgba(229, 103, 90, 0.08);
+  border: 1px solid rgba(229, 103, 90, 0.3);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  color: var(--connex-danger);
+}
+
+.cx-error-list__item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.cx-error-list__code {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   RESPONSIVE — RAILS COLLAPSE TO DRAWERS AT ≤ 1100px
+   ═══════════════════════════════════════════════════════════ */
+
+@media (max-width: 1100px) {
+  .cx-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+    overflow: auto;
+  }
+
+  .cx-rail-left,
+  .cx-rail-right {
+    /* Collapse to horizontal scrollable strip */
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: none;
+    border-left: none;
+    border-bottom: 1px solid var(--connex-stroke);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .cx-rail-right {
+    border-top: 1px solid var(--connex-stroke);
+    border-bottom: none;
+  }
+
+  .cx-stepper {
+    flex-direction: row;
+  }
+
+  .cx-stepper__item {
+    flex-direction: column;
+    align-items: center;
+    padding-bottom: 0;
+    padding-right: var(--space-6);
+  }
+
+  .cx-stepper__item:not(:last-child)::after {
+    /* Horizontal connector */
+    left: 28px;
+    right: 0;
+    top: 13px;
+    bottom: auto;
+    width: auto;
+    height: 1px;
+  }
+
+  .cx-stepper__body {
+    align-items: center;
+    padding-top: var(--space-2);
+  }
+}
