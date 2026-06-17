@@ -158,32 +158,24 @@ Error strings are prefixed with the code (`"EMPTY_BOX: Box 1 is empty…"`) for 
 
 ---
 
-## TODO for DD1750 Agent
+## DD1750 Integration (wired in Wave 1 reconciliation)
 
-The `/api/connex/<id>/generate` route has a clearly marked `# TODO(DD1750 agent)` block.
+Both render stubs have been replaced with real calls:
 
-**Expected interface:**
+**`/api/connex/<id>/generate`** — per-box stamped DD1750s:
 ```python
-# sitrep_render.py  (owned by DD1750 agent)
-def generate_stamped_box_pdf(
-    bom_items: list,          # list of render_core.BomItem
-    template_pdf: str,        # path to blank_1750.pdf
-    out_path: str,            # output file path
-    header: render_core.HeaderInfo,  # includes stamp_text, sloc, sun, connex_no, seal_no
-) -> None:
-    """Render one per-box DD1750 with battalion stamp applied."""
-    ...
+hdr = render_core.build_connex_header(connex, box, box_count, box_nums_label, profile)
+render_core.generate_dd1750_from_items(items, TEMPLATE_PDF, out_path, hdr, render_core.draw_master_header)
+```
+`build_connex_header` populates `stamp_text` from the profile; the stamp renders automatically inside `generate_dd1750_from_items`.
 
-def render_sitrep_pdf(sitrep: dict) -> bytes:
-    """Render a SITREP PDF from the Contract C dict. Returns raw PDF bytes."""
-    ...
+**`/api/sitrep/pdf`** — real SITREP PDF:
+```python
+import sitrep_render
+pdf_bytes = sitrep_render.render_sitrep_pdf(sitrep)  # returns bytes when output_path omitted
 ```
 
-Until `sitrep_render` is available the routes fall back gracefully:
-- `/generate` — uses existing `render_core.generate_dd1750_from_items` (no stamp)
-- `/sitrep/pdf` — returns SITREP JSON as raw bytes (placeholder "PDF")
-
-Both fallbacks are guarded with `# TODO(DD1750 agent)` comments at the exact substitution point.
+Verified: generated `/tmp/test_box_001_stamped.pdf` (59 KB) and `/tmp/test_sitrep.pdf` (3 KB).
 
 ---
 

@@ -1018,25 +1018,18 @@ def api_generate_connex(connex_id):
                         unit_of_issue=it.get("unit_of_issue", "EA"),
                     ))
 
-                hdr = render_core.HeaderInfo(
-                    packed_by=connex.get("packed_by") or profile.get("default_packed_by", ""),
-                    num_boxes=str(connex.get("box_count", 1)),
-                    end_item=f"Box {box_num}",
-                    date=connex.get("date", ""),
-                    typed_name=connex.get("signed_by", ""),
-                    sloc=box.get("sloc", ""),
-                    shrh_poc=box.get("shrh_poc", ""),
-                    sun=connex.get("sun") or "[SUN PENDING]",
-                    connex_no=connex.get("connex_no") or "[CONNEX PENDING]",
-                    seal_no=connex.get("seal_no") or "[SEAL PENDING]",
-                    stamp_text=profile.get("stamp_text", ""),
+                # build_connex_header injects bracketed placeholders for blank
+                # sun/connex_no/seal_no and populates stamp_text from the
+                # profile so the stamp renders automatically inside
+                # generate_dd1750_from_items.
+                hdr = render_core.build_connex_header(
+                    connex,
+                    box,
+                    connex.get("box_count", 1),
+                    str(box_num),   # box_nums_label: range-compressed or single num
+                    profile or None,
                 )
 
-                # TODO(DD1750 agent): replace this call with stamp-aware render
-                # once sitrep_render.generate_stamped_box_pdf(bom_items, TEMPLATE_PDF,
-                # out_path, header=hdr) is available.  That function should accept the
-                # same bom_items list and HeaderInfo and apply the battalion stamp.
-                # Fallback: use existing generate_dd1750_from_items (no stamp).
                 out_fd, out_path = tempfile.mkstemp(suffix=".pdf", dir=tmpdir)
                 os.close(out_fd)
                 render_core.generate_dd1750_from_items(
@@ -1132,13 +1125,11 @@ def api_sitrep_pdf():
     POST /api/sitrep/pdf  body: same as /api/sitrep
     -> binary PDF
 
-    TODO(DD1750 agent): replace this stub with a call to
-    sitrep_render.render_sitrep_pdf(sitrep_dict) once available.
-    That function should accept the Contract C dict and return raw PDF bytes.
-
-    Stub returns the JSON as a plain-text "PDF" so downstream agents can wire
-    the real render without breaking the route contract.
+    Delegates to sitrep_render.render_sitrep_pdf(sitrep_dict) which returns
+    raw PDF bytes when called without output_path.
     """
+    import sitrep_render
+
     data = request.get_json(silent=True) or {}
     connexes, profile = _resolve_connexes_for_sitrep(data)
 
@@ -1153,15 +1144,11 @@ def api_sitrep_pdf():
     if boms_by_id:
         sitrep = _sitrep.enrich_sitrep_boms(sitrep, boms_by_id)
 
-    # TODO(DD1750 agent): swap this block for the real render call:
-    #   import sitrep_render
-    #   pdf_bytes = sitrep_render.render_sitrep_pdf(sitrep)
-    # Expected interface: sitrep_render.render_sitrep_pdf(sitrep: dict) -> bytes
-    pdf_bytes = json.dumps(sitrep, indent=2).encode("utf-8")
+    pdf_bytes = sitrep_render.render_sitrep_pdf(sitrep)
 
-    return send_file(
-        io.BytesIO(pdf_bytes),
+    from flask import Response
+    return Response(
+        pdf_bytes,
         mimetype="application/pdf",
-        as_attachment=True,
-        download_name="SITREP.pdf",
+        headers={"Content-Disposition": "attachment; filename=sitrep.pdf"},
     )
