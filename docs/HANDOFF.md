@@ -8,3 +8,4 @@ Each agent writes its handoff to docs/handoff/<agent>.md. This index links them.
 - 3D Connex: docs/handoff/3d-connex.md
 - Frontend: docs/handoff/frontend.md
 - QA: docs/handoff/qa.md
+- Documentation: docs/handoff/documentation.md
