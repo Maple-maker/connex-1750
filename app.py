@@ -970,13 +970,14 @@ def api_seal_connex(connex_id):
 def api_generate_connex(connex_id):
     """
     POST /api/connex/<connex_id>/generate
-    -> binary ZIP (one DD1750 PDF per box, battalion stamp applied)
+    -> binary ZIP containing:
+       - Master_1750.pdf — single master DD1750 listing all boxes' contents
+       - Box_001.pdf, Box_002.pdf, ... — one stamped DD1750 per occupied box
 
-    Works with and without an attached ingest job.  Content rows come from two
-    sources, collected in order per box:
-      1. BOM items (when an ingest job is attached and box has bom_ids).
-      2. individual_items stored directly on the box (description, sn, nsn, lin).
-    A box is skipped only if it has no content from either source.
+    Works with and without an attached ingest job.  Content comes from two sources:
+      1. BOM items (when an ingest job is attached) via packing.items_for_box.
+      2. individual_items stored on each box dict.
+    A box is skipped only when it has no content from either source.
     """
     connex = _connex_store.load_connex(connex_id)
     if connex is None:
@@ -996,12 +997,68 @@ def api_generate_connex(connex_id):
 
     with tempfile.TemporaryDirectory() as tmpdir:
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+
+            # ----------------------------------------------------------------
+            # Master 1750 — one row per occupied box, both BOM + individual sources
+            # ----------------------------------------------------------------
+
+            # BOM-sourced master rows (packing engine, same as /generate-master).
+            master_rows = packing.boxes_to_master_rows(boms, box_map) if boms and box_map else []
+
+            # Synthetic master rows for individual_items.  One row per non-blank
+            # item, keyed to its box_num so the BOX NO. column is populated.
+            for box in connex.get("boxes", []):
+                box_num = box["box_num"]
+                for item in box.get("individual_items", []):
+                    desc = (item.get("description") or "").strip()
+                    if not desc:
+                        continue
+                    master_rows.append({
+                        "box_num": box_num,
+                        "model":   desc,
+                        "lin":     (item.get("lin") or "").strip(),
+                        "nsn":     (item.get("nsn") or "").strip(),
+                        "serials": [(item.get("sn") or "").strip()] if (item.get("sn") or "").strip() else [],
+                        "qty":     1,
+                    })
+
+            if master_rows:
+                # condense collapses identical end-items across boxes; re-sequences 1..N.
+                condensed = master_core.condense_master_rows(master_rows)
+                master_bom_items = master_core.rows_to_bom_items(condensed)
+
+                # Use a synthetic "all-boxes" header: sloc/shrh blank on the master
+                # (it spans all boxes), stamp from the profile.
+                master_hdr = render_core.build_connex_header(
+                    connex,
+                    {},                         # no single box — master spans all
+                    connex.get("box_count", 1),
+                    "ALL",                      # box_nums_label for the master
+                    profile or None,
+                )
+
+                master_fd, master_path = tempfile.mkstemp(suffix=".pdf", dir=tmpdir)
+                os.close(master_fd)
+                render_core.generate_dd1750_from_items(
+                    master_bom_items,
+                    TEMPLATE_PDF,
+                    master_path,
+                    header=master_hdr,
+                    draw_master_header_fn=render_core.draw_master_header,
+                )
+                with open(master_path, "rb") as fh:
+                    zf.writestr("Master_1750.pdf", fh.read())
+
+            # ----------------------------------------------------------------
+            # Per-box DD1750s — one stamped PDF per occupied box
+            # ----------------------------------------------------------------
+
             for box in connex.get("boxes", []):
                 box_num = box["box_num"]
                 bom_items = []
                 line_seq = 1  # re-sequence line numbers across both sources
 
-                # Source 1: BOM items from the ingest job (when a job is attached).
+                # Source 1: BOM component items from the ingest job.
                 if boms and box_map:
                     for it in packing.items_for_box(boms, box_map, box_num):
                         nsn_str = it.get("nsn", "") or ""
@@ -1017,15 +1074,14 @@ def api_generate_connex(connex_id):
                         ))
                         line_seq += 1
 
-                # Source 2: individual items stored on the box dict.
+                # Source 2: individual items on the box.
                 for item in box.get("individual_items", []):
                     desc = (item.get("description") or "").strip()
                     if not desc:
-                        continue  # skip blank rows (UI may send empty placeholders)
+                        continue  # skip blank placeholder rows from the UI
                     nsn_str = (item.get("nsn") or "").strip()
                     lin_str = (item.get("lin") or "").strip()
                     sn_str  = (item.get("sn")  or "").strip()
-                    # Encode lin + sn into the NSN cell (same pattern as BOM path).
                     parts = []
                     if nsn_str:
                         parts.append(nsn_str)
@@ -1043,16 +1099,15 @@ def api_generate_connex(connex_id):
                     line_seq += 1
 
                 if not bom_items:
-                    continue  # empty box — skip (seal should have caught this)
+                    continue  # empty box — skip
 
                 # build_connex_header injects bracketed placeholders for blank
-                # sun/connex_no/seal_no and populates stamp_text from the profile
-                # so the stamp renders automatically inside generate_dd1750_from_items.
+                # sun/connex_no/seal_no and populates stamp_text from the profile.
                 hdr = render_core.build_connex_header(
                     connex,
                     box,
                     connex.get("box_count", 1),
-                    str(box_num),   # box_nums_label: single num or range-compressed
+                    str(box_num),
                     profile or None,
                 )
 
@@ -1066,12 +1121,11 @@ def api_generate_connex(connex_id):
                     draw_master_header_fn=render_core.draw_master_header,
                 )
 
-                zip_name = f"Box_{box_num:03d}.pdf"
                 with open(out_path, "rb") as fh:
-                    zf.writestr(zip_name, fh.read())
+                    zf.writestr(f"Box_{box_num:03d}.pdf", fh.read())
                 rendered_boxes += 1
 
-    if rendered_boxes == 0:
+    if rendered_boxes == 0 and not master_rows:
         return jsonify({"error": "No occupied boxes to render.", "code": "EMPTY_CONNEX"}), 400
 
     zip_buffer.seek(0)

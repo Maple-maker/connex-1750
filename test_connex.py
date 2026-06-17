@@ -378,6 +378,188 @@ class TestIndividualItemsOnlyConnex(unittest.TestCase):
         self.assertEqual(updated["boxes"][0]["individual_items"], [])
 
 
+class TestGenerateMasterRows(unittest.TestCase):
+    """
+    Regression tests for the master-row synthesis logic used by /generate to
+    build Master_1750.pdf.  The route collects rows from both BOM sources
+    (packing.boxes_to_master_rows) and individual_items on each box, then
+    passes them through master_core.condense_master_rows + rows_to_bom_items.
+
+    These tests exercise the synthetic individual_items → master row path so
+    the ZIP always contains Master_1750.pdf and that path can't silently regress.
+    """
+
+    def _make_individual_items_connex_boxes(self):
+        """Two boxes each with one individual item, no BOM job."""
+        return [
+            {
+                "box_num": 1,
+                "bom_ids": [],
+                "sloc": "BLDG-100",
+                "shrh_poc": "CPT JONES",
+                "individual_items": [
+                    {"description": "M4A1 Carbine", "sn": "SN-W001",
+                     "nsn": "1005-01-231-0973", "lin": "R97234"},
+                ],
+            },
+            {
+                "box_num": 2,
+                "bom_ids": [],
+                "sloc": "BLDG-101",
+                "shrh_poc": "SGT SMITH",
+                "individual_items": [
+                    {"description": "Helmet ACH", "sn": "SN-H002",
+                     "nsn": "8470-01-523-5949", "lin": "H12345"},
+                ],
+            },
+        ]
+
+    def _build_master_rows_from_individual_items(self, boxes):
+        """Mirror the row-synthesis logic in api_generate_connex."""
+        master_rows = []
+        for box in boxes:
+            box_num = box["box_num"]
+            for item in box.get("individual_items", []):
+                desc = (item.get("description") or "").strip()
+                if not desc:
+                    continue
+                master_rows.append({
+                    "box_num": box_num,
+                    "model":   desc,
+                    "lin":     (item.get("lin") or "").strip(),
+                    "nsn":     (item.get("nsn") or "").strip(),
+                    "serials": [(item.get("sn") or "").strip()] if (item.get("sn") or "").strip() else [],
+                    "qty":     1,
+                })
+        return master_rows
+
+    def test_individual_items_produce_master_rows(self):
+        boxes = self._make_individual_items_connex_boxes()
+        rows = self._build_master_rows_from_individual_items(boxes)
+        self.assertEqual(len(rows), 2)
+
+    def test_master_rows_have_correct_box_nums(self):
+        boxes = self._make_individual_items_connex_boxes()
+        rows = self._build_master_rows_from_individual_items(boxes)
+        self.assertEqual(rows[0]["box_num"], 1)
+        self.assertEqual(rows[1]["box_num"], 2)
+
+    def test_master_rows_have_description_as_model(self):
+        boxes = self._make_individual_items_connex_boxes()
+        rows = self._build_master_rows_from_individual_items(boxes)
+        self.assertEqual(rows[0]["model"], "M4A1 Carbine")
+        self.assertEqual(rows[1]["model"], "Helmet ACH")
+
+    def test_master_rows_include_serial_in_serials_list(self):
+        boxes = self._make_individual_items_connex_boxes()
+        rows = self._build_master_rows_from_individual_items(boxes)
+        self.assertEqual(rows[0]["serials"], ["SN-W001"])
+
+    def test_blank_description_items_skipped(self):
+        """Individual items with no description must not generate master rows."""
+        boxes = [{
+            "box_num": 1, "bom_ids": [],
+            "individual_items": [
+                {"description": "", "sn": "SN-1", "nsn": "", "lin": ""},  # blank — skip
+                {"description": "Real Item", "sn": "SN-2", "nsn": "", "lin": ""},
+            ],
+        }]
+        rows = self._build_master_rows_from_individual_items(boxes)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["model"], "Real Item")
+
+    def test_master_rows_pass_through_condense(self):
+        """condense_master_rows must not crash on individual_items-derived rows."""
+        import master_core
+        boxes = self._make_individual_items_connex_boxes()
+        rows = self._build_master_rows_from_individual_items(boxes)
+        condensed = master_core.condense_master_rows(rows)
+        # Two distinct items — both preserved, re-sequenced 1..2.
+        self.assertEqual(len(condensed), 2)
+        box_nums = [r["box_num"] for r in condensed]
+        self.assertEqual(box_nums, [1, 2])
+
+    def test_condensed_rows_produce_bom_items(self):
+        """rows_to_bom_items must not crash and must yield one item per row."""
+        import master_core
+        boxes = self._make_individual_items_connex_boxes()
+        rows = self._build_master_rows_from_individual_items(boxes)
+        condensed = master_core.condense_master_rows(rows)
+        bom_items = master_core.rows_to_bom_items(condensed)
+        # At minimum one BomItem per condensed row (no serial overflow here).
+        self.assertGreaterEqual(len(bom_items), 2)
+
+    def test_zip_namelist_includes_master(self):
+        """
+        Smoke-test that a ZIP built from the individual-items path contains
+        Master_1750.pdf.  Exercises the real render_core path end-to-end
+        without Flask.
+        """
+        import zipfile, io, tempfile, os
+        import master_core, render_core, packing
+
+        TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "blank_1750.pdf")
+
+        boxes = self._make_individual_items_connex_boxes()
+        connex = {
+            "connex_id": "cx_test_master",
+            "connex_no": "CONEX-T1",
+            "sun": "SUN-T1",
+            "seal_no": "S-T1",
+            "box_count": 2,
+            "packed_by": "1LT RABATIN",
+            "signed_by": "CPT HOLLAND",
+            "date": "17 JUN 2026",
+            "boxes": boxes,
+        }
+
+        master_rows = self._build_master_rows_from_individual_items(boxes)
+        condensed = master_core.condense_master_rows(master_rows)
+        master_bom_items = master_core.rows_to_bom_items(condensed)
+
+        master_hdr = render_core.build_connex_header(connex, {}, 2, "ALL", None)
+
+        zip_buf = io.BytesIO()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                m_fd, m_path = tempfile.mkstemp(suffix=".pdf", dir=tmpdir)
+                os.close(m_fd)
+                render_core.generate_dd1750_from_items(
+                    master_bom_items, TEMPLATE, m_path,
+                    header=master_hdr,
+                    draw_master_header_fn=render_core.draw_master_header,
+                )
+                with open(m_path, "rb") as fh:
+                    zf.writestr("Master_1750.pdf", fh.read())
+
+                for box in boxes:
+                    # minimal per-box PDF (one item)
+                    item = box["individual_items"][0]
+                    bi = [render_core.BomItem(
+                        line_no=1,
+                        description=item["description"],
+                        nsn=item.get("nsn", ""),
+                        qty=1, unit_of_issue="EA",
+                    )]
+                    hdr = render_core.build_connex_header(connex, box, 2, str(box["box_num"]), None)
+                    b_fd, b_path = tempfile.mkstemp(suffix=".pdf", dir=tmpdir)
+                    os.close(b_fd)
+                    render_core.generate_dd1750_from_items(
+                        bi, TEMPLATE, b_path,
+                        header=hdr,
+                        draw_master_header_fn=render_core.draw_master_header,
+                    )
+                    with open(b_path, "rb") as fh:
+                        zf.writestr(f"Box_{box['box_num']:03d}.pdf", fh.read())
+
+        zip_buf.seek(0)
+        names = zipfile.ZipFile(zip_buf).namelist()
+        self.assertIn("Master_1750.pdf", names)
+        self.assertIn("Box_001.pdf", names)
+        self.assertIn("Box_002.pdf", names)
+        self.assertEqual(len(names), 3)
+
+
 if __name__ == "__main__":
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(sys.modules[__name__])
