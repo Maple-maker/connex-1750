@@ -972,58 +972,87 @@ def api_generate_connex(connex_id):
     POST /api/connex/<connex_id>/generate
     -> binary ZIP (one DD1750 PDF per box, battalion stamp applied)
 
-    Delegates to DD1750 agent's stamp-aware render.  While that agent is in
-    flight the route falls back to the existing generate_dd1750_from_items()
-    with standard header fields (no stamp).
+    Works with and without an attached ingest job.  Content rows come from two
+    sources, collected in order per box:
+      1. BOM items (when an ingest job is attached and box has bom_ids).
+      2. individual_items stored directly on the box (description, sn, nsn, lin).
+    A box is skipped only if it has no content from either source.
     """
     connex = _connex_store.load_connex(connex_id)
     if connex is None:
         return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
 
+    # Load BOM data from an attached job when present; not required.
     ingest_job_id = connex.get("ingest_job_id")
-    if not ingest_job_id or ingest_job_id not in JOBS:
-        return jsonify({"error": "No attached ingest job.", "code": "NO_JOB"}), 400
-
-    job = JOBS[ingest_job_id]
-    boms = job["boms"]
-    box_map = job["box_map"]
+    job = JOBS.get(ingest_job_id) if ingest_job_id else None
+    boms    = job["boms"]    if job else []
+    box_map = job["box_map"] if job else {}
 
     # Load the profile for stamp + header defaults.
     profile = _profiles.load_profile(connex.get("profile_id", "")) or {}
 
     zip_buffer = io.BytesIO()
+    rendered_boxes = 0
 
     with tempfile.TemporaryDirectory() as tmpdir:
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
             for box in connex.get("boxes", []):
                 box_num = box["box_num"]
-                items_raw = packing.items_for_box(boms, box_map, box_num)
-                if not items_raw:
-                    continue
-
                 bom_items = []
-                for it in items_raw:
-                    nsn_str = it.get("nsn", "") or ""
-                    sn = (it.get("serial_number") or "").strip()
-                    if sn:
-                        nsn_str = (nsn_str + "  SN: " + sn).strip() if nsn_str else "SN: " + sn
+                line_seq = 1  # re-sequence line numbers across both sources
+
+                # Source 1: BOM items from the ingest job (when a job is attached).
+                if boms and box_map:
+                    for it in packing.items_for_box(boms, box_map, box_num):
+                        nsn_str = it.get("nsn", "") or ""
+                        sn = (it.get("serial_number") or "").strip()
+                        if sn:
+                            nsn_str = (nsn_str + "  SN: " + sn).strip() if nsn_str else "SN: " + sn
+                        bom_items.append(render_core.BomItem(
+                            line_no=line_seq,
+                            description=it.get("description", ""),
+                            nsn=nsn_str,
+                            qty=it.get("qty", 1),
+                            unit_of_issue=it.get("unit_of_issue", "EA"),
+                        ))
+                        line_seq += 1
+
+                # Source 2: individual items stored on the box dict.
+                for item in box.get("individual_items", []):
+                    desc = (item.get("description") or "").strip()
+                    if not desc:
+                        continue  # skip blank rows (UI may send empty placeholders)
+                    nsn_str = (item.get("nsn") or "").strip()
+                    lin_str = (item.get("lin") or "").strip()
+                    sn_str  = (item.get("sn")  or "").strip()
+                    # Encode lin + sn into the NSN cell (same pattern as BOM path).
+                    parts = []
+                    if nsn_str:
+                        parts.append(nsn_str)
+                    if lin_str:
+                        parts.append(f"LIN: {lin_str}")
+                    if sn_str:
+                        parts.append(f"SN: {sn_str}")
                     bom_items.append(render_core.BomItem(
-                        line_no=it.get("line_no", 1),
-                        description=it.get("description", ""),
-                        nsn=nsn_str,
-                        qty=it.get("qty", 1),
-                        unit_of_issue=it.get("unit_of_issue", "EA"),
+                        line_no=line_seq,
+                        description=desc,
+                        nsn="  ".join(parts),
+                        qty=1,
+                        unit_of_issue="EA",
                     ))
+                    line_seq += 1
+
+                if not bom_items:
+                    continue  # empty box — skip (seal should have caught this)
 
                 # build_connex_header injects bracketed placeholders for blank
-                # sun/connex_no/seal_no and populates stamp_text from the
-                # profile so the stamp renders automatically inside
-                # generate_dd1750_from_items.
+                # sun/connex_no/seal_no and populates stamp_text from the profile
+                # so the stamp renders automatically inside generate_dd1750_from_items.
                 hdr = render_core.build_connex_header(
                     connex,
                     box,
                     connex.get("box_count", 1),
-                    str(box_num),   # box_nums_label: range-compressed or single num
+                    str(box_num),   # box_nums_label: single num or range-compressed
                     profile or None,
                 )
 
@@ -1040,6 +1069,10 @@ def api_generate_connex(connex_id):
                 zip_name = f"Box_{box_num:03d}.pdf"
                 with open(out_path, "rb") as fh:
                     zf.writestr(zip_name, fh.read())
+                rendered_boxes += 1
+
+    if rendered_boxes == 0:
+        return jsonify({"error": "No occupied boxes to render.", "code": "EMPTY_CONNEX"}), 400
 
     zip_buffer.seek(0)
     connex_label = re.sub(r'[^\w\-]', '_', connex.get("connex_no") or connex_id)[:40]
@@ -1061,6 +1094,9 @@ def _resolve_connexes_for_sitrep(data: dict) -> tuple[list[dict], dict | None]:
 
     Accepts {connex_ids: [...]} OR {profile_id: "..."}.
     Returns (connexes, profile_dict_or_None).
+
+    Uses connex_store.load_connex for all file I/O — avoids importing json
+    directly in this module and keeps error handling consistent.
     """
     connex_ids = data.get("connex_ids")
     profile_id = data.get("profile_id")
@@ -1079,13 +1115,12 @@ def _resolve_connexes_for_sitrep(data: dict) -> tuple[list[dict], dict | None]:
             for fname in os.listdir(_connex_store.CONNEXES_DIR):
                 if not fname.endswith(".json"):
                     continue
-                try:
-                    with open(os.path.join(_connex_store.CONNEXES_DIR, fname), encoding="utf-8") as fh:
-                        cx = json.load(fh)
-                    if cx.get("profile_id") == profile_id:
-                        connexes.append(cx)
-                except (json.JSONDecodeError, OSError):
-                    continue
+                # Derive connex_id from filename (strip .json suffix) and
+                # load through the store so all I/O is in one place.
+                cid = fname[:-5]
+                cx = _connex_store.load_connex(cid)
+                if cx and cx.get("profile_id") == profile_id:
+                    connexes.append(cx)
     else:
         connexes = []
 

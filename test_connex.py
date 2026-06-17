@@ -311,6 +311,73 @@ class TestApplyBomAssignments(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class TestIndividualItemsOnlyConnex(unittest.TestCase):
+    """
+    Regression tests for the individual-items-only workflow:
+    a box that has ONLY individual_items (no bom_ids, no ingest job).
+    Seal must succeed; the store layer must reflect the box as occupied.
+
+    The generate route (tested live in the curl walkthrough) reads individual_items
+    directly off the box — these tests verify the store layer is correct so
+    generate has correct data to work with.
+    """
+
+    def setUp(self):
+        shutil.rmtree(connex_store.CONNEXES_DIR, ignore_errors=True)
+        os.makedirs(connex_store.CONNEXES_DIR, exist_ok=True)
+
+    def _create_individual_items_connex(self):
+        cx = connex_store.create_connex(FAKE_PROFILE_ID, box_count=1)
+        updated = connex_store.patch_connex(cx["connex_id"], {
+            "packed_by": "1LT RABATIN",
+            "signed_by": "CPT HOLLAND",
+            "sun": "SUN-IND-001",
+            "boxes": [{
+                "box_num": 1,
+                "sloc": "BLDG-200",
+                "shrh_poc": "SGT SMITH",
+                "individual_items": [
+                    {"description": "Helmet ACH", "sn": "SN-1",
+                     "nsn": "8470-01-523-5949", "lin": "H12345"},
+                ],
+            }],
+        })
+        return updated
+
+    def test_box_with_individual_item_passes_seal(self):
+        """An individual-items-only box must seal successfully (no EMPTY_BOX error)."""
+        cx = self._create_individual_items_connex()
+        result = connex_store.seal_connex(cx["connex_id"])
+        self.assertTrue(result["ok"], msg=f"Expected ok:true but got errors: {result['errors']}")
+
+    def test_individual_item_persists_on_box(self):
+        cx = self._create_individual_items_connex()
+        loaded = connex_store.load_connex(cx["connex_id"])
+        box = loaded["boxes"][0]
+        self.assertEqual(len(box["individual_items"]), 1)
+        self.assertEqual(box["individual_items"][0]["description"], "Helmet ACH")
+        self.assertEqual(box["individual_items"][0]["sn"], "SN-1")
+
+    def test_box_marked_complete_with_individual_item_and_sloc_shrh(self):
+        cx = self._create_individual_items_connex()
+        box = cx["boxes"][0]
+        self.assertTrue(box["complete"])
+
+    def test_box_has_no_bom_ids(self):
+        """Confirm bom_ids is empty — content is purely individual_items."""
+        cx = self._create_individual_items_connex()
+        box = cx["boxes"][0]
+        self.assertEqual(box["bom_ids"], [])
+
+    def test_patch_clears_individual_items_when_empty_list_sent(self):
+        """Sending individual_items:[] replaces the list (allows UI to clear items)."""
+        cx = self._create_individual_items_connex()
+        updated = connex_store.patch_connex(cx["connex_id"], {
+            "boxes": [{"box_num": 1, "individual_items": []}],
+        })
+        self.assertEqual(updated["boxes"][0]["individual_items"], [])
+
+
 if __name__ == "__main__":
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(sys.modules[__name__])

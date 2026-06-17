@@ -196,6 +196,68 @@ class TestEnrichSitrepBoms(unittest.TestCase):
         self.assertEqual(bom["nomenclature"], "bom_abc")
 
 
+class TestIndividualItemsOnlySitrep(unittest.TestCase):
+    """
+    Regression tests for a connex whose boxes contain ONLY individual_items
+    (no ingest job, no bom_ids).  These must produce a valid SITREP and non-zero
+    item counts — previously the generate route rejected these connexes with
+    NO_JOB; sitrep must handle them too.
+    """
+
+    def _individual_item_connex(self):
+        return {
+            "connex_id": "cx_ind_test",
+            "profile_id": "prof_abc",
+            "connex_no": "CONEX-IND-01",
+            "sun": "SUN-IND-001",
+            "seal_no": "S-999",
+            "status": "sealed",
+            "box_count": 1,
+            "boxes": [
+                {
+                    "box_num": 1,
+                    "bom_ids": [],
+                    "sloc": "BLDG-200",
+                    "shrh_poc": "SGT SMITH",
+                    "individual_items": [
+                        {"description": "Helmet ACH", "sn": "SN-1",
+                         "nsn": "8470-01-523-5949", "lin": "H12345"},
+                    ],
+                }
+            ],
+        }
+
+    def test_individual_item_count_non_zero(self):
+        cx = self._individual_item_connex()
+        result = sitrep.build_sitrep([cx], None)
+        self.assertEqual(result["individual_item_count"], 1)
+
+    def test_box_count_non_zero(self):
+        """A box with only individual_items counts as an occupied box."""
+        cx = self._individual_item_connex()
+        result = sitrep.build_sitrep([cx], None)
+        self.assertEqual(result["box_count"], 1)
+
+    def test_bom_count_zero(self):
+        cx = self._individual_item_connex()
+        result = sitrep.build_sitrep([cx], None)
+        self.assertEqual(result["bom_count"], 0)
+
+    def test_individual_item_present_in_box_block(self):
+        cx = self._individual_item_connex()
+        result = sitrep.build_sitrep([cx], None)
+        items = result["connexes"][0]["boxes"][0]["individual_items"]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["description"], "Helmet ACH")
+        self.assertEqual(items[0]["sn"], "SN-1")
+
+    def test_no_flags_for_individual_items_only_connex_with_sun(self):
+        cx = self._individual_item_connex()
+        result = sitrep.build_sitrep([cx], None)
+        # SUN is set so no SUN flag; no zero-on-hand boxes since box has items.
+        self.assertEqual(result["flags"], [])
+
+
 if __name__ == "__main__":
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(sys.modules[__name__])
