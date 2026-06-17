@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CONNEX 1750 — Packing List Generator</title>
+<title>CRATE — Container Readiness and Accountability Tracking Engine</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📦</text></svg>">
 
 <!-- ============================================================
      CONTRACT E — Design system tokens (owned by UI Design agent).
@@ -12,26 +13,9 @@
 <link rel="stylesheet" href="/static/tokens.css">
 <link rel="stylesheet" href="/static/style.css">
 
-<!-- ============================================================
-     Decision #1 (locked): no build step.
-     three.js r160+ loaded via ES module importmap from CDN.
-     The 3D agent's connex3d.js imports 'three' by this bare specifier.
-     OrbitControls are included so connex3d.js can use them without a path.
-     ============================================================ -->
-<script type="importmap">
-{
-  "imports": {
-    "three":                      "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/":              "https://unpkg.com/three@0.160.0/examples/jsm/",
-    "three/examples/jsm/controls/OrbitControls.js":
-                                  "https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js"
-  }
-}
-</script>
+<!-- No external JS dependencies required (3D view removed). -->
 
-<!-- Shell styles — scoped to the new cx-layout shell.
-     Legacy packing-list sections keep their own styles in the legacy block below.
-     3D canvas is mounted dynamically by REVIEW_SEAL step only — not present at load. -->
+<!-- Shell styles — scoped to the new cx-layout shell. -->
 <style>
   /* Step error banner */
   #step-error {
@@ -57,39 +41,62 @@
     max-height: 100vh;
   }
 
-  /* 3D canvas — injected into #cx-3d-mount by REVIEW_SEAL step */
-  #cx-3d-mount canvas {
-    width: 100%;
-    min-height: 380px;
-    display: block;
-    border-radius: var(--radius-md);
-  }
-
-  /* Packing split-screen — two equal panes */
-  #packing-split {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--space-4);
-    align-items: start;
-  }
-  @media (max-width: 900px) {
-    #packing-split { grid-template-columns: 1fr; }
-  }
-
-  /* BOM pool card selected state (click-to-assign) */
-  .cx-bom-card--selected {
-    outline: 2px solid var(--connex-gold);
-    outline-offset: 2px;
-  }
-
-  /* Box drop-target highlight during drag */
-  .box-card--drag-over {
-    outline: 2px solid var(--connex-ok);
-    background: rgba(111,207,151,0.08);
-  }
-
   /* Legacy wrap */
   #legacy-wrap { padding-top: var(--space-4); }
+
+  /* Right rail box cards scroll */
+  #packing-boxes {
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+
+  /* BOM Assignment Spreadsheet table */
+  .cx-bom-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-sm);
+  }
+  .cx-bom-table th, .cx-bom-table td {
+    border: 1px solid var(--connex-stroke);
+    padding: var(--space-2) var(--space-3);
+    text-align: left;
+    vertical-align: middle;
+  }
+  .cx-bom-table th {
+    background: var(--connex-panel-2);
+    color: var(--connex-light);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .cx-bom-table tr:hover td {
+    background: rgba(255,255,255,0.02);
+  }
+
+  /* Inline label tags for LIN / SN / NSN */
+  .cx-label-tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--connex-gray);
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--connex-stroke);
+    border-radius: 3px;
+    padding: 1px 4px;
+    margin-right: 3px;
+  }
+
+  /* Audit flag items */
+  .cx-flag {
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    margin-bottom: 6px;
+    font-size: var(--text-sm);
+  }
+  .cx-flag--warn  { background: rgba(212,160,55,0.12);  border-left: 3px solid var(--connex-gold);   color: var(--connex-light); }
+  .cx-flag--ok    { background: rgba(111,207,151,0.10);  border-left: 3px solid var(--connex-ok);     color: var(--connex-light); }
+  .cx-flag--error { background: rgba(229,103,90,0.12);   border-left: 3px solid var(--connex-danger); color: var(--connex-danger); }
 
   /* ── Tutorial overlay ─────────────────────────────────────── */
 
@@ -238,7 +245,7 @@
   <!-- renderBanner() populates this -->
   <span class="cx-banner__emblem">&#x1F4E6;</span>
   <span class="cx-banner__body">
-    <span class="cx-banner__unit">CONNEX 1750</span>
+    <span class="cx-banner__unit">CRATE</span>
     <span class="cx-banner__sub">Loading…</span>
   </span>
   <!-- Tutorial reopen button — always visible in header -->
@@ -399,12 +406,12 @@
       <h2>3 &middot; Header Information</h2>
       <div class="grid">
         <div class="field"><label>Packed By — RANK, LAST, FIRST</label><input id="h_packed_by" placeholder="SSG MORRIS, JOHN"></div>
-        <div class="field"><label>UIC</label><input id="h_uic" placeholder="WABCD0"></div>
-        <div class="field"><label>Battery</label><input id="h_battery" placeholder="B BTY"></div>
+        <div class="field"><label>UIC</label><input id="h_uic" placeholder="W3BX2K"></div>
+        <div class="field"><label>Battery / Company</label><input id="h_battery" placeholder="B BTY"></div>
         <div class="field"><label>Battalion</label><input id="h_battalion" placeholder="2-55 ADA"></div>
-        <div class="field"><label>SHRH POC</label><input id="h_shrh" placeholder="CPT JONES"></div>
+        <div class="field"><label>SHRH POC</label><input id="h_shrh" placeholder="DOE, JOHN"></div>
         <div class="field"><label>SLOC / Section</label><input id="h_sloc" placeholder="BLDG-100 / SEC"></div>
-        <div class="field"><label>Container #</label><input id="h_container" placeholder="CONEX-01"></div>
+        <div class="field"><label>Container #</label><input id="h_container" placeholder="CONNEX-01"></div>
         <div class="field"><label>SUN #</label><input id="h_sun" placeholder="SUN-2026-001"></div>
         <div class="field"><label>SEAL #</label><input id="h_seal" placeholder="SEAL-4455"></div>
         <div class="field"><label>Date</label><input id="h_date" placeholder="15 JUN 2026"></div>
@@ -466,13 +473,13 @@
         <div class="card">
           <h2>Header Information (Legacy)</h2>
           <div class="grid">
-            <div class="field"><label>UIC</label><input id="l_uic" placeholder="WABCD0"></div>
-            <div class="field"><label>Battery</label><input id="l_battery" placeholder="B BTY"></div>
+            <div class="field"><label>UIC</label><input id="l_uic" placeholder="W3BX2K"></div>
+            <div class="field"><label>Battery / Company</label><input id="l_battery" placeholder="B BTY"></div>
             <div class="field"><label>Battalion</label><input id="l_battalion" placeholder="1-1 ADA"></div>
             <div class="field"><label>Packed By (RANK LAST, FIRST)</label><input id="l_packed_by" placeholder="SSG SMITH, JOHN"></div>
-            <div class="field"><label>SHRH POC</label><input id="l_shrh" placeholder="CPT JONES"></div>
+            <div class="field"><label>SHRH POC</label><input id="l_shrh" placeholder="DOE, JOHN"></div>
             <div class="field"><label>SLOC / Section</label><input id="l_sloc" placeholder="BLDG-100 / SEC"></div>
-            <div class="field"><label>Container #</label><input id="l_container" placeholder="CONEX-01"></div>
+            <div class="field"><label>Container #</label><input id="l_container" placeholder="CONNEX-01"></div>
             <div class="field"><label>SUN #</label><input id="l_sun" placeholder="SUN-2026-001"></div>
             <div class="field"><label>SEAL #</label><input id="l_seal" placeholder="SEAL-4455"></div>
             <div class="field"><label>Date</label><input id="l_date" placeholder="15 JUN 2026"></div>

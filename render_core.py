@@ -307,6 +307,16 @@ def generate_dd1750_overlay(
         y_line1 = row_top - 10.0    # First line (description)
         y_line2 = row_top - 20.0    # Second line (NSN / master line-2 text)
 
+        # Draw a thin separator above each new (non-continuation) BOM item
+        # to make individual items visually distinct in the master 1750.
+        if not item.is_continuation and i > 0:
+            can.saveState()
+            can.setStrokeColorRGB(0.55, 0.55, 0.55)
+            can.setLineWidth(0.4)
+            can.setDash(2, 2)
+            can.line(X_CONTENT_L, row_top - 1, X_TOTAL_R, row_top - 1)
+            can.restoreState()
+
         if not item.is_continuation:
             # Box number (centered) — in master mode this is the box number
             can.setFont("Helvetica", 9)
