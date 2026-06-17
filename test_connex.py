@@ -560,6 +560,109 @@ class TestGenerateMasterRows(unittest.TestCase):
         self.assertEqual(len(names), 3)
 
 
+class TestAssignWarnings(unittest.TestCase):
+    """
+    DEFECT-1 regression: POST /api/connex/<id>/assign must return a non-empty
+    `warnings` list when a move references a bom_id that is not in the attached
+    job, or targets a box number outside the connex range.  Valid moves are still
+    applied; HTTP status stays 200.
+    """
+
+    def setUp(self):
+        shutil.rmtree(connex_store.CONNEXES_DIR, ignore_errors=True)
+        os.makedirs(connex_store.CONNEXES_DIR, exist_ok=True)
+
+        # Import app here so the module-level data-dir patch (above) is already in
+        # effect before app.py first touches connex_store.CONNEXES_DIR.
+        import app as _app
+        import packing
+
+        self._app = _app
+        self._packing = packing
+
+        # Create a connex with 2 boxes.
+        self._cx = connex_store.create_connex(FAKE_PROFILE_ID, box_count=2)
+        connex_id = self._cx["connex_id"]
+
+        # Build a minimal fake ingest job with one known BOM.
+        fake_item = {"line_no": 1, "description": "Widget", "nsn": "1234-00-111-2222",
+                     "qty": 1, "unit_of_issue": "EA"}
+        self._known_bom_id = "bom_known_001"
+        fake_bom = {"bom_id": self._known_bom_id, "items": [fake_item]}
+
+        # box_map: item key -> box_num
+        item_key = packing.item_key(self._known_bom_id, 1)
+        fake_box_map = {item_key: 1}
+
+        self._job_id = "job_test_warn"
+        _app.JOBS[self._job_id] = {
+            "boms": [fake_bom],
+            "box_map": fake_box_map,
+        }
+
+        # Attach the fake job to the connex (patch_connex accepts ingest_job_id).
+        connex_store.patch_connex(connex_id, {"ingest_job_id": self._job_id})
+
+        self._client = _app.app.test_client()
+        self._connex_id = connex_id
+
+    def tearDown(self):
+        self._app.JOBS.pop(self._job_id, None)
+
+    def test_unknown_bom_id_returns_warning(self):
+        """A move with a bom_id not in the attached job must produce a warning."""
+        resp = self._client.post(
+            f"/api/connex/{self._connex_id}/assign",
+            json={"moves": [{"bom_id": "bom_does_not_exist", "box_num": 1}]},
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertIn("warnings", body)
+        self.assertGreater(len(body["warnings"]), 0)
+        self.assertIn("bom_does_not_exist", body["warnings"][0])
+
+    def test_unknown_bom_id_does_not_affect_valid_move(self):
+        """A mix of valid + unknown bom_id: valid move applied, unknown warned."""
+        resp = self._client.post(
+            f"/api/connex/{self._connex_id}/assign",
+            json={"moves": [
+                {"bom_id": self._known_bom_id, "box_num": 2},     # valid
+                {"bom_id": "bom_phantom", "box_num": 1},           # unknown
+            ]},
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        # Warning for the unknown bom only.
+        self.assertEqual(len(body["warnings"]), 1)
+        self.assertIn("bom_phantom", body["warnings"][0])
+        # Known BOM should now be in box 2.
+        box2 = next(b for b in body["connex"]["boxes"] if b["box_num"] == 2)
+        self.assertIn(self._known_bom_id, box2["bom_ids"])
+
+    def test_out_of_range_box_num_returns_warning(self):
+        """A move targeting a box number beyond box_count must produce a warning."""
+        resp = self._client.post(
+            f"/api/connex/{self._connex_id}/assign",
+            json={"moves": [{"bom_id": self._known_bom_id, "box_num": 99}]},
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertIn("warnings", body)
+        self.assertGreater(len(body["warnings"]), 0)
+        self.assertIn("out of range", body["warnings"][0])
+
+    def test_valid_move_no_warnings(self):
+        """A fully valid move must return an empty warnings list."""
+        resp = self._client.post(
+            f"/api/connex/{self._connex_id}/assign",
+            json={"moves": [{"bom_id": self._known_bom_id, "box_num": 1}]},
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertIn("warnings", body)
+        self.assertEqual(body["warnings"], [])
+
+
 if __name__ == "__main__":
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(sys.modules[__name__])

@@ -901,22 +901,27 @@ def api_assign_connex(connex_id):
     job  = JOBS[ingest_job_id]
     boms = job["boms"]
     box_map = job["box_map"]
+    box_count = connex.get("box_count", len(connex.get("boxes", [])))
+
+    warnings: list[str] = []
 
     for move in data.get("moves", []):
         bom_id = move.get("bom_id")
         bom = next((b for b in boms if b["bom_id"] == bom_id), None)
 
+        if bom is None:
+            warnings.append(
+                f"bom_id {bom_id!r} not found in attached job — skipped"
+            )
+            continue
+
         if move.get("exclude"):
-            if bom is None:
-                continue
             box_map = dict(box_map)
             for item in bom.get("items", []):
                 box_map.pop(packing.item_key(bom_id, item["line_no"]), None)
             continue
 
         if move.get("separate"):
-            if bom is None:
-                continue
             occ = packing.occupied_boxes(box_map)
             new_box = (max(occ) + 1) if occ else 1
             for item in bom.get("items", []):
@@ -929,8 +934,14 @@ def api_assign_connex(connex_id):
             continue
         target_box = int(target_box)
 
-        if bom is None:
+        # Warn if the target box number is outside the connex range.
+        if target_box < 1 or target_box > box_count:
+            warnings.append(
+                f"bom_id {bom_id!r} targets box {target_box} which is out of range "
+                f"(connex has {box_count} boxes) — skipped"
+            )
             continue
+
         for item in bom.get("items", []):
             key = packing.item_key(bom_id, item["line_no"])
             box_map = packing.reassign(box_map, key, target_box)
@@ -948,7 +959,7 @@ def api_assign_connex(connex_id):
     updated = _connex_store.apply_bom_assignments(connex_id, bom_ids_by_box)
     if updated is None:
         return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
-    return jsonify({"connex": updated})
+    return jsonify({"connex": updated, "warnings": warnings})
 
 
 @app.route("/api/connex/<connex_id>/seal", methods=["POST"])
