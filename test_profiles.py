@@ -67,7 +67,7 @@ class TestUpsertProfile(unittest.TestCase):
     def test_list_profiles_sorted_by_last_used_desc(self):
         import time
         p1 = profiles.upsert_profile("108th ADA", "2-55 ADA", "B")
-        time.sleep(0.01)
+        time.sleep(1.1)  # timestamps are second-precision; need >1s gap
         p2 = profiles.upsert_profile("99th ADA", "1-1 ADA", "A")
         listing = profiles.list_profiles()
         self.assertEqual(listing[0]["profile_id"], p2["profile_id"])
@@ -108,6 +108,29 @@ class TestUpsertProfile(unittest.TestCase):
     def test_touch_last_used_nonexistent_returns_none(self):
         result = profiles.touch_last_used("nonexistent" * 3)
         self.assertIsNone(result)
+
+    def test_brigade_image_round_trips(self):
+        """brigade_image is saved and loaded correctly."""
+        p = profiles.upsert_profile(
+            "108th ADA", "2-55 ADA", "B",
+            brigade_image="108th_Air_Defense_Artillery_Brigade.svg",
+        )
+        loaded = profiles.load_profile(p["profile_id"])
+        self.assertEqual(loaded["brigade_image"], "108th_Air_Defense_Artillery_Brigade.svg")
+
+    def test_brigade_image_defaults_to_empty(self):
+        """Profiles created without brigade_image default to ''."""
+        p = profiles.upsert_profile("108th ADA", "2-55 ADA", "B")
+        self.assertEqual(p.get("brigade_image", ""), "")
+
+    def test_brigade_image_updates_on_upsert(self):
+        """Upsert overwrites brigade_image when the unit identity matches."""
+        p1 = profiles.upsert_profile("108th ADA", "2-55 ADA", "B",
+                                      brigade_image="old.svg")
+        p2 = profiles.upsert_profile("108th ADA", "2-55 ADA", "B",
+                                      brigade_image="new.svg")
+        self.assertEqual(p1["profile_id"], p2["profile_id"])
+        self.assertEqual(p2["brigade_image"], "new.svg")
 
 
 class TestAtomicWrite(unittest.TestCase):

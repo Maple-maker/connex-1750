@@ -33,7 +33,8 @@ GET  /api/profiles
 
 POST /api/profiles
   body: { "brigade": "108th ADA Brigade", "battalion": "2-55 ADA", "battery": "B",
-          "uic": "WH1ZB0", "default_packed_by": "1LT RABATIN", "stamp_text": "2-55 ADA" }
+          "uic": "WH1ZB0", "default_packed_by": "1LT RABATIN", "stamp_text": "2-55 ADA",
+          "brigade_image": "108th_Air_Defense_Artillery_Brigade.svg" }
   -> { "profile": Profile }
 
 GET  /api/profiles/<profile_id>
@@ -51,6 +52,7 @@ GET  /api/profiles/<profile_id>
   "default_packed_by": "1LT RABATIN, JAIDEN",
   "default_shrh_poc": "",
   "stamp_text": "2-55 ADA",
+  "brigade_image": "108th_Air_Defense_Artillery_Brigade.svg",
   "created": "2026-06-17T00:00:00Z",
   "last_used": "2026-06-17T00:00:00Z"
 }

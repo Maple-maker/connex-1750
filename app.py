@@ -774,7 +774,8 @@ def api_list_profiles():
 def api_create_profile():
     """
     POST /api/profiles  body: {brigade, battalion, battery, uic?,
-                                default_packed_by?, default_shrh_poc?, stamp_text?}
+                                default_packed_by?, default_shrh_poc?, stamp_text?,
+                                brigade_image?}
     -> {profile: Profile}   (create or upsert by (brigade, battalion, battery))
     """
     data = request.get_json(silent=True) or {}
@@ -793,6 +794,7 @@ def api_create_profile():
         default_packed_by=data.get("default_packed_by", ""),
         default_shrh_poc=data.get("default_shrh_poc", ""),
         stamp_text=data.get("stamp_text", ""),
+        brigade_image=data.get("brigade_image", ""),
     )
     return jsonify({"profile": profile})
 
