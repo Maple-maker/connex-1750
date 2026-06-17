@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-17
 **Branch:** feat/connex-3d
-**Agent:** Frontend (Wave 2 → Wave 3 redesign)
+**Agent:** Frontend (Wave 2 → Wave 3 redesign → Wave 3 tutorial)
 
 ---
 
@@ -10,9 +10,9 @@
 
 | File | Status | Notes |
 |------|--------|-------|
-| `templates/index.html` | REPLACED | 3-column .cx-layout shell; three.js importmap; legacy 2D flow preserved in `<details>`; split-screen CSS; no persistent 3D canvas at load |
-| `static/app.js` | REPLACED | 6-step ES-module state machine; 2D split-screen PACKING; 3D ONLY in REVIEW_SEAL; all Contract A calls |
-| `static/glossary.js` | NEW | Canonical GLOSSARY (13 terms) + `buildHelpPopover()` helper |
+| `templates/index.html` | REPLACED | 3-column .cx-layout shell; three.js importmap; legacy 2D flow preserved in `<details>`; split-screen CSS; no persistent 3D canvas at load; tutorial overlay + header button |
+| `static/app.js` | REPLACED | 6-step ES-module state machine; 2D split-screen PACKING; 3D ONLY in REVIEW_SEAL; all Contract A calls; tutorial carousel |
+| `static/glossary.js` | NEW | Canonical GLOSSARY (13 terms) + `buildHelpPopover()` helper; img/caption support for SEAL#/CONNEX# |
 | `docs/handoff/frontend.md` | NEW | This file |
 
 **Files NOT changed (owned by other agents):**
@@ -149,6 +149,50 @@ All jargon terms have `?` popovers via `buildHelpPopover()` from `glossary.js`:
 - Renders the `errors` array from `POST /api/connex/<id>/seal` response (`{ok:false, errors:[...]}`) into `#seal-errors`.
 - Contract B error codes: `EMPTY_BOX`, `MISSING_SLOC`, `MISSING_SHRH`, `NO_SIGNER`, `SIGNER_EQ_PACKER`.
 - Blank SUN/CONNEX#/SEAL# are allowed at seal (server returns ok=true).
+
+---
+
+## Tutorial Carousel
+
+### Gate logic
+```js
+const TUTORIAL_STORAGE_KEY = "connex_tutorial_v1_seen";
+// On DOMContentLoaded: if !localStorage.getItem(key) → openTutorial()
+// On close/skip/get-started: localStorage.setItem(key, "1")
+```
+
+### Public API (all on `window`)
+| Function | Description |
+|----------|-------------|
+| `openTutorial()` | Opens modal at slide 0; attaches keyboard handler |
+| `closeTutorial()` | Closes modal; sets localStorage gate; removes keyboard handler |
+| `tutorialNext()` | Advances one slide; on last slide calls closeTutorial() |
+| `tutorialBack()` | Goes back one slide |
+| `tutorialGoTo(idx)` | Jumps to a specific slide (dot indicator click) |
+| `handleTutorialBackdropClick(e)` | Closes if backdrop (not modal) clicked |
+
+### Keyboard
+- `ArrowRight` → next slide
+- `ArrowLeft` → back
+- `Escape` → close
+- `Tab` / `Shift+Tab` → focus trapped inside `#cx-tutorial-modal`
+
+### Slides (7 total)
+1. Welcome — overview of the whole tool
+2. Step 1 · Profile — insignia gallery + unit save
+3. Step 2 · Connex Setup — name + box count
+4. Step 3 · Packing — drag/click-select BOM assignment + SLOC/SHRH
+5. Step 4 · Seal Data — SUN/CONNEX/SEAL # + signer
+6. Step 5 · Review & Seal — visual check + stamp + ZIP download
+7. Step 6 · Next / SITREP — another connex or commander's SITREP
+
+### HTML elements (in index.html)
+- `#cx-tutorial-backdrop` — full-screen dim; `.cx-tutorial--open` class toggles visibility
+- `#cx-tutorial-modal` — glassmorphism card (glass background, gold border)
+- `#cx-tutorial-slide` — injected by `renderTutorialSlide()`
+- `#cx-tutorial-dots` — dot row, injected by `renderTutorialSlide()`
+- `#cx-tutorial-back`, `#cx-tutorial-next`, `#cx-tutorial-skip`, `#cx-tutorial-close`
+- `#cx-tutorial-reopen` — header button, always visible
 
 ---
 
