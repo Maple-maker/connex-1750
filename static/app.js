@@ -37,6 +37,10 @@ let STATE = {
   /* operator identity */
   profile: null,     // Profile dict from /api/profiles
 
+  /* insignia gallery — loaded once from /static/formations/manifest.json */
+  formations: [],          // full list from manifest
+  selectedFormation: null, // { file, name, echelon, is_adata } picked by operator
+
   /* current connex being packed */
   connex: null,      // Connex dict from /api/connex/<id>
 
@@ -251,6 +255,7 @@ window._stepClick = function(step) {
 
 /* =========================================================
  * Banner render (profile unit identity)
+ * Shows the brigade insignia image when available; falls back to package emoji.
  * ========================================================= */
 function renderBanner() {
   const el = $("cx-banner");
@@ -263,8 +268,14 @@ function renderBanner() {
       </span>`;
     return;
   }
-  const p = STATE.profile;
-  el.innerHTML = `<span class="cx-banner__emblem">&#x1F4E6;</span>
+  const p      = STATE.profile;
+  const imgSrc = p.brigade_image ? `/static/formations/${esc(p.brigade_image)}` : "";
+  const emblem = imgSrc
+    ? `<img src="${imgSrc}" alt="${esc(p.brigade || "")}" class="cx-banner__emblem"
+            width="40" height="40" style="object-fit:contain;" loading="lazy"
+            onerror="this.outerHTML='<span class=\\'cx-banner__emblem\\'>&#x1F4E6;</span>'">`
+    : `<span class="cx-banner__emblem">&#x1F4E6;</span>`;
+  el.innerHTML = `${emblem}
     <span class="cx-banner__body">
       <span class="cx-banner__unit">${esc(p.brigade || "")}</span>
       <span class="cx-banner__sub">${esc(p.battalion || "")}${p.battery ? " — " + esc(p.battery) + " BTY" : ""}</span>
@@ -293,20 +304,59 @@ function renderStepPanel() {
 
 /* =========================================================
  * STEP 1 — PROFILE
- * Load /api/profiles; pick or create.
+ * Insignia gallery → pick brigade visually → fill battalion/battery → save.
+ * On load, show "resume" card if a saved profile already exists.
  * ========================================================= */
 function renderProfileStep(center, right) {
   center.innerHTML = `
-    <div class="cx-panel">
-      <h2 class="cx-panel__title">1 · Select Profile</h2>
-      <p class="cx-field-hint">Choose your unit profile or create a new one. The profile sets your brigade banner and auto-fills packed-by defaults.</p>
-      <div id="profile-list" class="cx-section-title" style="margin-bottom:var(--space-4);">Loading profiles…</div>
-      <div class="cx-divider"></div>
-      <h3 class="cx-section-title" style="margin-top:var(--space-6);">Create / Update Profile</h3>
-      <div class="cx-field-wrap">
-        <label class="cx-label">Brigade</label>
-        <input class="cx-field" id="p_brigade" placeholder="108th ADA Brigade">
+    <div class="cx-panel" id="profile-resume-wrap" style="display:none;margin-bottom:var(--space-4);">
+      <!-- Populated by loadProfiles() when a saved profile is found -->
+    </div>
+
+    <div class="cx-panel" id="profile-gallery-panel">
+      <h2 class="cx-panel__title">1 · Select Your Brigade</h2>
+      <p class="cx-field-hint">Pick your unit insignia — then fill in battalion details below.</p>
+
+      <!-- Search + echelon filter -->
+      <div style="display:flex;gap:var(--space-3);flex-wrap:wrap;margin-bottom:var(--space-4);">
+        <input class="cx-field" id="gallery-search" placeholder="Search unit name…"
+               style="flex:1;min-width:160px;"
+               oninput="filterGallery()">
+        <select class="cx-field" id="gallery-echelon" style="width:160px;" onchange="filterGallery()">
+          <option value="">All Echelons</option>
+          <option value="Brigade" selected>Brigade</option>
+          <option value="Division">Division</option>
+          <option value="Corps">Corps</option>
+          <option value="Army">Army</option>
+          <option value="Regiment">Regiment</option>
+          <option value="Group">Group</option>
+        </select>
       </div>
+
+      <!-- Insignia grid — populated by renderGallery() -->
+      <div id="insignia-grid" style="
+        display:grid;
+        grid-template-columns:repeat(auto-fill,minmax(110px,1fr));
+        gap:var(--space-3);
+        max-height:380px;
+        overflow-y:auto;
+        padding:var(--space-2);
+      ">
+        <div class="cx-field-hint">Loading insignia…</div>
+      </div>
+    </div>
+
+    <!-- Secondary fields — hidden until a brigade is selected -->
+    <div class="cx-panel" id="profile-detail-panel" style="display:none;margin-top:var(--space-4);">
+      <div style="display:flex;align-items:center;gap:var(--space-4);margin-bottom:var(--space-4);">
+        <img id="selected-insignia-img" src="" alt="" width="64" height="64"
+             style="object-fit:contain;border-radius:var(--radius-sm);">
+        <div>
+          <div class="cx-banner__unit" id="selected-brigade-label"></div>
+          <div class="cx-banner__sub">Selected Unit</div>
+        </div>
+      </div>
+
       <div class="cx-field-wrap">
         <label class="cx-label">Battalion</label>
         <input class="cx-field" id="p_battalion" placeholder="2-55 ADA">
@@ -331,102 +381,233 @@ function renderProfileStep(center, right) {
         <label class="cx-label">Default SHRH POC ${buildHelpPopover("SHRH POC")}</label>
         <input class="cx-field" id="p_shrh" placeholder="CPT JONES">
       </div>
+
       <div id="profile-save-error" role="alert" class="cx-field-error-msg" style="display:none;"></div>
       <div style="display:flex;gap:var(--space-3);margin-top:var(--space-4);">
-        <button class="cx-btn cx-btn--primary" onclick="saveProfile()">Save Profile</button>
+        <button class="cx-btn cx-btn--primary" onclick="saveProfile()">Save &amp; Continue</button>
+        <button class="cx-btn cx-btn--ghost"   onclick="clearBrigadeSelection()">Change Brigade</button>
       </div>
     </div>`;
 
   if (right) right.innerHTML = `
     <div class="cx-panel">
       <h3 class="cx-panel__title">About Profiles</h3>
-      <p class="cx-field-hint">Profiles store your unit identity so you don't retype it every session. The stamp text prints on sealed connexes.</p>
+      <p class="cx-field-hint">Profiles store your unit identity for reuse across sessions.
+        The insignia appears in the app banner. The stamp text prints on sealed connexes.</p>
     </div>`;
 
-  loadProfiles();
+  loadProfilesAndGallery();
 }
 
-async function loadProfiles() {
-  try {
-    const data = await api.get("/api/profiles");
-    const profiles = data.profiles || [];
-    const el = $("profile-list");
-    if (!el) return;
-
-    if (!profiles.length) {
-      el.textContent = "No saved profiles — create one below.";
-      return;
+/* Load the manifest + saved profiles in parallel */
+async function loadProfilesAndGallery() {
+  /* Fetch manifest if not already cached */
+  if (!STATE.formations.length) {
+    try {
+      const r    = await fetch("/static/formations/manifest.json");
+      const data = await r.json();
+      STATE.formations = data.formations || [];
+    } catch (e) {
+      STATE.formations = [];
+      console.warn("[profile] Could not load formations manifest:", e.message);
     }
-
-    el.innerHTML = profiles.map(p => `
-      <div class="cx-panel cx-panel--2" style="margin-bottom:var(--space-3);cursor:pointer;"
-           onclick="selectProfile('${esc(p.profile_id)}')">
-        <div class="cx-banner__unit" style="font-size:var(--text-sm);">${esc(p.brigade || "")} — ${esc(p.battalion || "")}</div>
-        <div class="cx-banner__sub" style="font-size:var(--text-xs);">${esc(p.battery ? "BTY " + p.battery : "")} ${esc(p.uic || "")}</div>
-      </div>
-    `).join("");
-
-    /* Pre-fill form with last used profile */
-    const last = profiles.sort((a, b) => (b.last_used || "").localeCompare(a.last_used || ""))[0];
-    if (last) prefillProfileForm(last);
-  } catch (e) {
-    const el = $("profile-list");
-    if (el) el.textContent = "Could not load profiles: " + e.message;
   }
+
+  /* Check for existing saved profiles → show resume card */
+  try {
+    const data     = await api.get("/api/profiles");
+    const profiles = (data.profiles || []).sort(
+      (a, b) => (b.last_used || "").localeCompare(a.last_used || "")
+    );
+    if (profiles.length) renderResumeCard(profiles[0]);
+  } catch (_) {
+    /* No profiles yet — that's fine; gallery stays as the entry point */
+  }
+
+  renderGallery();
 }
 
-function prefillProfileForm(p) {
-  if ($("p_brigade"))  $("p_brigade").value  = p.brigade  || "";
-  if ($("p_battalion")) $("p_battalion").value = p.battalion || "";
-  if ($("p_battery"))  $("p_battery").value  = p.battery  || "";
-  if ($("p_uic"))      $("p_uic").value      = p.uic       || "";
-  if ($("p_packed_by")) $("p_packed_by").value = p.default_packed_by || "";
-  if ($("p_stamp"))    $("p_stamp").value    = p.stamp_text || "";
-  if ($("p_shrh"))     $("p_shrh").value     = p.default_shrh_poc || "";
+/* Render a "welcome back" card for the most-recently-used profile */
+function renderResumeCard(p) {
+  const wrap = $("profile-resume-wrap");
+  if (!wrap) return;
+
+  const imgSrc = p.brigade_image
+    ? `/static/formations/${esc(p.brigade_image)}`
+    : "";
+  const imgHtml = imgSrc
+    ? `<img src="${imgSrc}" alt="" width="48" height="48"
+            style="object-fit:contain;margin-right:var(--space-3);" loading="lazy">`
+    : `<span class="cx-banner__emblem" style="margin-right:var(--space-3);">&#x1F4E6;</span>`;
+
+  wrap.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:var(--space-3);">
+      <div style="display:flex;align-items:center;">
+        ${imgHtml}
+        <div>
+          <div class="cx-banner__unit" style="font-size:var(--text-sm);">${esc(p.brigade || "")}</div>
+          <div class="cx-banner__sub">${esc(p.battalion || "")}${p.battery ? " — BTY " + esc(p.battery) : ""}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:var(--space-2);">
+        <button class="cx-btn cx-btn--primary cx-btn--sm"
+                onclick="resumeSavedProfile('${esc(p.profile_id)}')">Resume</button>
+        <button class="cx-btn cx-btn--ghost cx-btn--sm"
+                onclick="dismissResumeCard()">New Profile</button>
+      </div>
+    </div>`;
+  wrap.style.display = "";
 }
 
-async function selectProfile(profileId) {
+/* One-click resume: load saved profile and advance */
+window.resumeSavedProfile = async function(profileId) {
   try {
     const data = await api.get(`/api/profiles/${profileId}`);
     STATE.profile = data.profile;
-    prefillProfileForm(data.profile);
-    showInfo("profile-save-error", "Profile selected: " + (data.profile.brigade || "") + " — " + (data.profile.battalion || ""));
+    if (STATE.profile.brigade_image) {
+      STATE.selectedFormation = STATE.formations.find(
+        f => f.file === STATE.profile.brigade_image
+      ) || { file: STATE.profile.brigade_image, name: STATE.profile.brigade };
+    }
     renderBanner();
+    goTo("CONNEX_SETUP");
   } catch (e) {
-    showError("profile-save-error", "Failed to load profile: " + e.message);
+    console.error("[profile] Resume failed:", e.message);
   }
+};
+
+window.dismissResumeCard = function() {
+  const wrap = $("profile-resume-wrap");
+  if (wrap) wrap.style.display = "none";
+};
+
+/* Render (or re-render) the insignia grid based on current filter values */
+function renderGallery() {
+  const grid    = $("insignia-grid");
+  if (!grid) return;
+
+  const query   = (($("gallery-search")  || {}).value || "").trim().toLowerCase();
+  const echelon = (($("gallery-echelon") || {}).value || "");
+
+  const filtered = STATE.formations.filter(f => {
+    const matchName    = !query   || f.name.toLowerCase().includes(query);
+    const matchEchelon = !echelon || f.echelon === echelon;
+    return matchName && matchEchelon;
+  });
+
+  if (!filtered.length) {
+    grid.innerHTML = `<span class="cx-field-hint" style="grid-column:1/-1;">No units match your search.</span>`;
+    return;
+  }
+
+  grid.innerHTML = filtered.map(f => {
+    const selected = STATE.selectedFormation && STATE.selectedFormation.file === f.file;
+    const badgeCls = f.is_adata ? "cx-badge cx-badge--ok" : "";
+    return `
+      <div class="cx-panel cx-panel--2"
+           style="cursor:pointer;text-align:center;padding:var(--space-3);
+                  ${selected ? "outline:2px solid var(--connex-gold);outline-offset:2px;" : ""}"
+           title="${esc(f.name)}"
+           onclick="selectFormation('${esc(f.file)}')">
+        <img src="/static/formations/${esc(f.file)}"
+             alt="${esc(f.name)}"
+             width="72" height="72"
+             loading="lazy"
+             style="object-fit:contain;display:block;margin:0 auto var(--space-2);"
+             onerror="this.style.display='none'">
+        <div style="font-size:var(--text-xs);color:var(--connex-gray);
+                    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+                    max-width:100%;" title="${esc(f.name)}">
+          ${esc(f.name)}
+        </div>
+        ${badgeCls ? `<span class="${badgeCls}" style="font-size:10px;margin-top:var(--space-1);">ADA</span>` : ""}
+      </div>`;
+  }).join("");
 }
 
-window.saveProfile = async function() {
-  const brigade    = ($("p_brigade")   || {}).value || "";
-  const battalion  = ($("p_battalion") || {}).value || "";
-  const battery    = ($("p_battery")   || {}).value || "";
-  const uic        = ($("p_uic")       || {}).value || "";
-  const packed_by  = ($("p_packed_by") || {}).value || "";
-  const stamp_text = ($("p_stamp")     || {}).value || "";
-  const shrh_poc   = ($("p_shrh")      || {}).value || "";
+/* Called by search/echelon filter inputs */
+window.filterGallery = function() {
+  renderGallery();
+};
 
-  if (!brigade || !battalion) {
-    showError("profile-save-error", "Brigade and Battalion are required.");
+/* User clicked an insignia card — highlight it and reveal detail fields */
+window.selectFormation = function(file) {
+  const formation = STATE.formations.find(f => f.file === file);
+  if (!formation) return;
+
+  STATE.selectedFormation = formation;
+
+  /* Re-render gallery to update the selection outline */
+  renderGallery();
+
+  /* Populate and show the detail panel */
+  const panel = $("profile-detail-panel");
+  if (panel) panel.style.display = "";
+
+  const img   = $("selected-insignia-img");
+  const label = $("selected-brigade-label");
+  if (img)   { img.src = `/static/formations/${esc(file)}`; img.alt = esc(formation.name); }
+  if (label)  label.textContent = formation.name;
+
+  /* Pre-fill stamp text from the unit name (last word / short form) */
+  const stamp = $("p_stamp");
+  if (stamp && !stamp.value) {
+    /* Derive a short stamp default: first numeric token in the name, e.g. "108th" */
+    const match = formation.name.match(/\b\d+\w*/);
+    stamp.value = match ? match[0].toUpperCase() : formation.name.split(" ")[0].toUpperCase();
+  }
+
+  /* Scroll detail panel into view on mobile */
+  panel && panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+};
+
+/* Clear selection and return to gallery */
+window.clearBrigadeSelection = function() {
+  STATE.selectedFormation = null;
+  const panel = $("profile-detail-panel");
+  if (panel) panel.style.display = "none";
+  renderGallery();
+};
+
+window.saveProfile = async function() {
+  if (!STATE.selectedFormation) {
+    showError("profile-save-error", "Select a brigade insignia first.");
+    return;
+  }
+
+  const brigade      = STATE.selectedFormation.name;
+  const brigade_image = STATE.selectedFormation.file;
+  const battalion    = ($("p_battalion") || {}).value || "";
+  const battery      = ($("p_battery")   || {}).value || "";
+  const uic          = ($("p_uic")       || {}).value || "";
+  const packed_by    = ($("p_packed_by") || {}).value || "";
+  const stamp_text   = ($("p_stamp")     || {}).value || "";
+  const shrh_poc     = ($("p_shrh")      || {}).value || "";
+
+  if (!battalion) {
+    showError("profile-save-error", "Battalion is required.");
     return;
   }
 
   try {
     const data = await api.post("/api/profiles", {
-      brigade, battalion, battery, uic,
+      brigade, brigade_image, battalion, battery, uic,
       default_packed_by: packed_by,
       default_shrh_poc:  shrh_poc,
       stamp_text,
     });
     STATE.profile = data.profile;
-    showInfo("profile-save-error", "Profile saved.");
     renderBanner();
-    // Auto-advance to next step
-    setTimeout(() => goTo("CONNEX_SETUP"), 800);
+    goTo("CONNEX_SETUP");
   } catch (e) {
     showError("profile-save-error", "Save failed: " + e.message);
   }
 };
+
+/* selectProfile — kept for backward compatibility (resume card uses resumeSavedProfile) */
+async function selectProfile(profileId) {
+  return window.resumeSavedProfile(profileId);
+}
 
 /* =========================================================
  * STEP 2 — CONNEX_SETUP
