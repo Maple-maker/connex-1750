@@ -745,11 +745,6 @@ def generate_master():
     )
 
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    app.run(host="0.0.0.0", port=port, debug=False)
-
-
 # ===========================================================================
 # CONNEX-3D ROUTES — Backend agent (Wave 1)
 # All routes below are new additive routes.  They do NOT modify any existing
@@ -1154,3 +1149,8 @@ def api_sitrep_pdf():
         mimetype="application/pdf",
         headers={"Content-Disposition": "attachment; filename=sitrep.pdf"},
     )
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
+    app.run(host="0.0.0.0", port=port, debug=False)
