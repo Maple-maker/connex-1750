@@ -71,6 +71,14 @@ class HeaderInfo:
     typed_name: str = ""   # signer name + title, drawn in the bottom TYPED NAME box
     # Page numbers are auto-calculated during rendering.
 
+    # --- Connex extension fields (new for CONNEX-3D build) ---
+    sloc: str = ""          # Storage Location (SLOC); multi-value OK (one per box)
+    shrh_poc: str = ""      # SHRH Property Officer / POC name
+    sun: str = ""           # System Unit Number — blank → "[SUN PENDING]" on PDF
+    connex_no: str = ""     # Physical container number — blank → "[CONNEX PENDING]"
+    seal_no: str = ""       # Seal number — blank → "[SEAL PENDING]"
+    stamp_text: str = ""    # Battalion stamp text (e.g. "2-55 ADA"); empty = no stamp
+
 
 def draw_master_header(can, header, page_num, total_pages):
     """
@@ -98,19 +106,39 @@ def draw_master_header(can, header, page_num, total_pages):
     SEAL) on the left, and the "Major End Items (N)" + "Box #s" summary in a
     second column on the right — this keeps the block short so it never spills
     past the cell's bottom divider.
+
+    Extension (CONNEX-3D): new HeaderInfo fields (sloc, shrh_poc, sun,
+    connex_no, seal_no, stamp_text) are folded into the PACKED BY block
+    (extra lines) and the END ITEM block (SUN / CONNEX / SEAL identifiers).
+    Blank values for sun/connex_no/seal_no render as bracketed placeholders so
+    the form is never silently empty. The battalion stamp is drawn last so it
+    never collides with form field text.
     """
     # --- PACKED BY block: inside cell B (x 185.4..311.4), below the label ---
     # The "PACKED BY" label occupies the first line (~y 740). We start the
-    # typed data just under it and step down 9.5pt per line. 4 lines fit
-    # comfortably between y≈730 and y≈702 (the cell bottom divider).
+    # typed data just under it and step down 9.0pt per line.
+    # New connex fields (SLOC, SHRH POC) are appended as additional lines;
+    # the cell is tall enough for up to 6 lines before hitting the divider at
+    # y≈702. We clip at 6 to be safe.
     if header.packed_by:
         lines = header.packed_by.split('\n')
+        # Append connex-specific lines only when not already embedded in packed_by
+        # (build_master_header pre-embeds them; these guards prevent duplication
+        # when called from legacy paths that don't pre-embed).
+        sloc_val = (getattr(header, "sloc", "") or "").strip()
+        shrh_val = (getattr(header, "shrh_poc", "") or "").strip()
+        packed_text = header.packed_by.upper()
+        if sloc_val and "SLOC" not in packed_text:
+            lines.append(f"SLOC: {sloc_val.upper()}")
+        if shrh_val and "SHRH" not in packed_text:
+            lines.append(f"SHRH POC: {shrh_val.upper()}")
+
         can.setFont("Helvetica", 7)
         x = 188            # left padding inside the PACKED BY cell (cell starts 185.4)
         y = 734            # first data line, just below the "PACKED BY" label
-        for line in lines[:4]:
+        for line in lines[:6]:
             can.drawString(x, y, line[:30])   # cell is ~123pt wide → ~30 chars at 7pt
-            y -= 9.0       # tighter step so all 4 lines clear the cell's bottom divider
+            y -= 9.0       # tighter step so all 6 lines clear the cell's bottom divider
 
     # --- Number of Boxes: centered in cell C (x 311.4..408.6) ---
     if header.num_boxes:
@@ -121,10 +149,14 @@ def draw_master_header(can, header, page_num, total_pages):
 
     # --- END ITEM block: inside the wide cell (x 45..408.6), below the label ---
     # The "3. END ITEM" label is at the top of the cell (~y 691). We start the
-    # data just below it (~y 681). We split the 6 logical lines into two columns
+    # data just below it (~y 681). We split the logical lines into two columns
     # so the block stays short (the example does the same):
-    #   Left column  (x≈100): the descriptive/identifier lines
-    #   Right column (x≈250): the "Major End Items (N)" + "Box #s" summary
+    #   Left column  (x≈47): descriptive/identifier lines
+    #   Right column (x≈232): "Major End Items (N)" + "Box #s" summary
+    #
+    # Connex extension: SUN / CONNEX / SEAL lines are injected into end_item by
+    # build_master_header; when they are blank, bracketed placeholders are used
+    # so the field is never left silently empty.
     if header.end_item:
         all_lines = header.end_item.split('\n')
         # Separate the summary lines (Major End Items / Box #s) from the rest.
@@ -138,7 +170,7 @@ def draw_master_header(can, header, page_num, total_pages):
 
         can.setFont("Helvetica", 7)
         # Left column: Initial Packing List / Container / SUN / SEAL.
-        # Start higher (685) + tighter step (8.5) so the 4th line (SEAL) clears
+        # Start higher (685) + tighter step (8.5) so the lines clear
         # the cell's bottom divider (~652.7); x=47 aligns to the cell's left edge.
         y = 685
         for line in left_lines[:5]:
@@ -166,6 +198,42 @@ def draw_master_header(can, header, page_num, total_pages):
     if getattr(header, "typed_name", ""):
         can.setFont("Helvetica", 8)
         can.drawString(47, 58, str(header.typed_name)[:45])
+
+    # --- Battalion stamp (last — drawn on top of background, avoiding form data) ---
+    # Positioned in the upper-right corner of the form, inside the PAGE x OF y
+    # region but offset right so it doesn't collide with the pre-printed cells.
+    # The stamp is a bold italic text block rotated 15° for a "stencil" feel.
+    # It only renders when stamp_text is non-empty, so legacy flows are unaffected.
+    stamp = (getattr(header, "stamp_text", "") or "").strip().upper()
+    if stamp:
+        _draw_stamp(can, stamp)
+
+
+def _draw_stamp(can, stamp_text: str):
+    """
+    Draw a text-stencil battalion stamp onto the canvas.
+
+    Placed in the upper-right corner of the signature block area (x≈480..570,
+    y≈60..90) so it never overlaps the pre-printed form header cells or the
+    table body. The stamp is rendered in bold-italic at 11pt, rotated 12° CCW,
+    with a subtle dark-red color to distinguish it from form text.
+
+    Args:
+        can: reportlab Canvas (current page, already configured).
+        stamp_text: Upper-cased battalion identifier, e.g. "2-55 ADA".
+    """
+    from reportlab.lib.colors import Color
+    stamp_color = Color(0.55, 0.08, 0.08)   # dark army red — distinct from black text
+
+    can.saveState()
+    can.setFont("Helvetica-BoldOblique", 11)
+    can.setFillColor(stamp_color)
+    # Rotate around the stamp's anchor point (bottom-left of the text block)
+    # so it sits in the lower-right signature region without drifting into fields.
+    can.translate(478, 72)
+    can.rotate(12)
+    can.drawString(0, 0, stamp_text[:20])
+    can.restoreState()
 
 
 def generate_dd1750_overlay(
@@ -396,4 +464,99 @@ __all__ = [
     'generate_dd1750_overlay', 'generate_dd1750_from_items',
     'draw_master_header', 'format_packed_by', 'format_end_item',
     'ROWS_PER_PAGE',
+    # Connex-3D additions
+    'build_connex_header',
 ]
+
+
+# ---------------------------------------------------------------------------
+# Connex-3D: header builder that folds connex fields + placeholder logic
+# ---------------------------------------------------------------------------
+
+def build_connex_header(
+    connex: dict,
+    box: dict,
+    box_count: int,
+    box_nums_label: str,
+    profile: dict = None,
+) -> "HeaderInfo":
+    """
+    Build a HeaderInfo for a single-box DD1750 from a Connex + Box dict.
+
+    This is the public entry point Backend calls for per-box PDF generation.
+    It injects bracketed placeholders for any blank sun/connex_no/seal_no so
+    the form is never silently empty.
+
+    Args:
+        connex:        The full Connex dict (see data model in 01_MVP_BUILD_GUIDE §4).
+        box:           The specific box dict from connex["boxes"] being rendered.
+        box_count:     Total box count for the "1. NO. BOXES" field.
+        box_nums_label: Range-compressed box list string, e.g. "1-5".
+        profile:       Optional Profile dict for stamp_text / battalion fields.
+
+    Returns:
+        A fully populated HeaderInfo ready to pass to generate_dd1750_from_items
+        with draw_master_header as the draw_master_header_fn.
+    """
+    def g(d, k):
+        return str((d or {}).get(k, "") or "").strip()
+
+    # Resolve bracketed placeholders for blank accountability fields
+    sun     = g(connex, "sun")     or "[SUN PENDING]"
+    cno     = g(connex, "connex_no") or "[CONNEX PENDING]"
+    seal    = g(connex, "seal_no") or "[SEAL PENDING]"
+    sloc    = g(box, "sloc")
+    shrh    = g(box, "shrh_poc")
+
+    packed_by = g(connex, "packed_by")
+    if profile:
+        uic_parts = []
+        if g(profile, "uic"):
+            uic_parts.append(f"UIC: {g(profile, 'uic').upper()}")
+        if g(profile, "battery"):
+            uic_parts.append(g(profile, "battery").upper())
+        if g(profile, "battalion"):
+            uic_parts.append(g(profile, "battalion").upper())
+        packed_by_lines = [packed_by.upper()] if packed_by else []
+        if uic_parts:
+            packed_by_lines.append("  ".join(uic_parts))
+        if sloc:
+            packed_by_lines.append(f"SLOC: {sloc.upper()}")
+        if shrh:
+            packed_by_lines.append(f"SHRH POC: {shrh.upper()}")
+        packed_by = "\n".join(packed_by_lines)
+    else:
+        lines = [packed_by.upper()] if packed_by else []
+        if sloc:
+            lines.append(f"SLOC: {sloc.upper()}")
+        if shrh:
+            lines.append(f"SHRH POC: {shrh.upper()}")
+        packed_by = "\n".join(lines)
+
+    # END ITEM block: SLOC prefix + identifiers left, summary right
+    end_lines = []
+    end_lines.append(f"{sloc + ' ' if sloc else ''}INITIAL PACKING LIST")
+    end_lines.append(f"CONTAINER #{cno}")
+    end_lines.append(f"SUN: {sun}")
+    end_lines.append(f"SEAL: {seal}")
+    end_lines.append(f"MAJOR END ITEMS: ({box_count})")
+    if box_nums_label:
+        end_lines.append(f"BOX #S: {box_nums_label}")
+
+    stamp = ""
+    if profile:
+        stamp = g(profile, "stamp_text").upper()
+
+    return HeaderInfo(
+        packed_by=packed_by,
+        num_boxes=str(box_count),
+        end_item="\n".join(end_lines),
+        date=g(connex, "date"),
+        typed_name=g(connex, "signed_by"),
+        sloc=sloc,
+        shrh_poc=shrh,
+        sun=sun,
+        connex_no=cno,
+        seal_no=seal,
+        stamp_text=stamp,
+    )
