@@ -139,7 +139,8 @@ def _sp(pt): return Spacer(1, pt)
 def _bom_table(boms: list, styles: dict) -> Optional[Table]:
     """
     Build a compact Table of BOM rows.
-    Columns: Nomenclature | LIN | Serial | Count
+    Columns: Nomenclature | LIN | Serial | Subitems
+    ("Subitems" = qty of subitems packed inside each end item / BOM.)
     Returns None when boms list is empty.
     """
     if not boms:
@@ -149,7 +150,7 @@ def _bom_table(boms: list, styles: dict) -> Optional[Table]:
         Paragraph("<b>Nomenclature</b>", styles["small"]),
         Paragraph("<b>LIN</b>",          styles["small"]),
         Paragraph("<b>Serial</b>",        styles["small"]),
-        Paragraph("<b>Qty</b>",           styles["small"]),
+        Paragraph("<b>Subitems</b>",      styles["small"]),
     ]
     rows = [header]
     for b in boms:
@@ -321,10 +322,13 @@ def render_sitrep_pdf(
         boxes = cx.get("boxes") or []
         for box in boxes:
             box_num  = box.get("box_num", "?")
+            label    = str(box.get("label",    "") or "")
             sloc     = str(box.get("sloc",     "") or "")
             shrh_poc = str(box.get("shrh_poc", "") or "")
             boms     = box.get("boms") or []
             ind_items = box.get("individual_items") or []
+
+            box_title = f"BOX {box_num}" + (f" — {label}" if label else "")
 
             box_meta_lines = []
             if sloc:
@@ -335,7 +339,7 @@ def render_sitrep_pdf(
 
             box_elements = [
                 _sp(4),
-                Paragraph(f"BOX {box_num}  —  {meta_text}", styles["box_hdr"]),
+                Paragraph(f"{box_title}  —  {meta_text}", styles["box_hdr"]),
             ]
 
             # BOMs table
@@ -384,7 +388,7 @@ def render_sitrep_pdf(
          Paragraph("Count",  styles["totals_lbl"])],
         ["Connexes",         str(sitrep_dict.get("connex_count", len(connexes)))],
         ["Total Boxes",      str(sitrep_dict.get("box_count",     ""))],
-        ["Total BOMs",       str(sitrep_dict.get("bom_count",      ""))],
+        ["End Items Packed (BOMs)", str(sitrep_dict.get("bom_count", ""))],
         ["Individual Items", str(sitrep_dict.get("individual_item_count", ""))],
     ]
     totals_tbl = Table(totals_data, colWidths=[BODY_W * 0.60, BODY_W * 0.40])

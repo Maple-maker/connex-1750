@@ -845,12 +845,14 @@ textarea.cx-field {
   overflow-y: auto;
 }
 
-/* Center — 3D canvas + toggle */
+/* Center — step content (scrolls independently of the rails) */
 .cx-center {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   position: relative;
+  padding: var(--space-6) var(--space-6);
 }
 
 .cx-canvas-area {

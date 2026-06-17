@@ -29,9 +29,12 @@
     margin: 0 0 var(--space-3);
   }
 
-  /* Popover open state — toggled by toggleHelp() in app.js */
+  /* Popover open state — toggled by toggleHelp() in app.js.
+     The base .cx-help__popover is hidden with opacity:0 + pointer-events:none
+     (not display:none), so we must un-hide it the same way or it never shows. */
   .cx-help__popover--open {
-    display: block !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
   }
 
   /* Rail scroll */

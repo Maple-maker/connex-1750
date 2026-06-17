@@ -106,6 +106,7 @@ def build_sitrep(
 
             boxes_out.append({
                 "box_num": box_num,
+                "label": box.get("label", ""),
                 "sloc": box.get("sloc", ""),
                 "shrh_poc": box.get("shrh_poc", ""),
                 "boms": boms_block,

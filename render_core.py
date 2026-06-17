@@ -517,6 +517,7 @@ def build_connex_header(
     seal    = g(connex, "seal_no") or "[SEAL PENDING]"
     sloc    = g(box, "sloc")
     shrh    = g(box, "shrh_poc")
+    label   = g(box, "label")
 
     packed_by = g(connex, "packed_by")
     if profile:
@@ -545,6 +546,8 @@ def build_connex_header(
 
     # END ITEM block: SLOC prefix + identifiers left, summary right
     end_lines = []
+    if label:
+        end_lines.append(label.upper())
     end_lines.append(f"{sloc + ' ' if sloc else ''}INITIAL PACKING LIST")
     end_lines.append(f"CONTAINER #{cno}")
     end_lines.append(f"SUN: {sun}")
