@@ -7,3 +7,7 @@ venv/
 # Local dev artifacts — reference real serials/paths; keep local, never publish
 sample_output.pdf
 verify.py
+data/profiles/*
+data/connexes/*
+!data/profiles/.gitkeep
+!data/connexes/.gitkeep

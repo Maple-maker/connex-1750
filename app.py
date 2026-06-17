@@ -748,3 +748,420 @@ def generate_master():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port, debug=False)
+
+
+# ===========================================================================
+# CONNEX-3D ROUTES — Backend agent (Wave 1)
+# All routes below are new additive routes.  They do NOT modify any existing
+# route or helper above this line.
+# ===========================================================================
+
+import profiles as _profiles
+import connex_store as _connex_store
+import sitrep as _sitrep
+
+# ---------------------------------------------------------------------------
+# Profile routes  (Contract A §Profiles)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/profiles", methods=["GET"])
+def api_list_profiles():
+    """GET /api/profiles -> {profiles: [Profile, ...]}"""
+    return jsonify({"profiles": _profiles.list_profiles()})
+
+
+@app.route("/api/profiles", methods=["POST"])
+def api_create_profile():
+    """
+    POST /api/profiles  body: {brigade, battalion, battery, uic?,
+                                default_packed_by?, default_shrh_poc?, stamp_text?}
+    -> {profile: Profile}   (create or upsert by (brigade, battalion, battery))
+    """
+    data = request.get_json(silent=True) or {}
+    brigade   = (data.get("brigade") or "").strip()
+    battalion = (data.get("battalion") or "").strip()
+    battery   = (data.get("battery") or "").strip()
+
+    if not brigade or not battalion:
+        return jsonify({"error": "brigade and battalion are required.", "code": "MISSING_FIELDS"}), 400
+
+    profile = _profiles.upsert_profile(
+        brigade=brigade,
+        battalion=battalion,
+        battery=battery,
+        uic=data.get("uic", ""),
+        default_packed_by=data.get("default_packed_by", ""),
+        default_shrh_poc=data.get("default_shrh_poc", ""),
+        stamp_text=data.get("stamp_text", ""),
+    )
+    return jsonify({"profile": profile})
+
+
+@app.route("/api/profiles/<profile_id>", methods=["GET"])
+def api_get_profile(profile_id):
+    """GET /api/profiles/<profile_id> -> {profile: Profile}"""
+    profile = _profiles.load_profile(profile_id)
+    if profile is None:
+        return jsonify({"error": f"Profile '{profile_id}' not found.", "code": "NOT_FOUND"}), 404
+    return jsonify({"profile": profile})
+
+
+# ---------------------------------------------------------------------------
+# Connex lifecycle routes  (Contract A §Connex lifecycle)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/connex", methods=["POST"])
+def api_create_connex():
+    """
+    POST /api/connex  body: {profile_id, box_count, connex_no?}
+    -> {connex: Connex}   status="building", boxes pre-spawned 1..N
+    """
+    data = request.get_json(silent=True) or {}
+    profile_id = data.get("profile_id", "")
+    box_count  = data.get("box_count")
+
+    if not profile_id:
+        return jsonify({"error": "profile_id is required.", "code": "MISSING_FIELDS"}), 400
+    if not isinstance(box_count, int) or box_count < 1:
+        return jsonify({"error": "box_count must be a positive integer.", "code": "INVALID_BOX_COUNT"}), 400
+    if _profiles.load_profile(profile_id) is None:
+        return jsonify({"error": f"Profile '{profile_id}' not found.", "code": "NOT_FOUND"}), 404
+
+    connex = _connex_store.create_connex(
+        profile_id=profile_id,
+        box_count=box_count,
+        connex_no=data.get("connex_no", ""),
+    )
+    _profiles.touch_last_used(profile_id)
+    return jsonify({"connex": connex})
+
+
+@app.route("/api/connex/<connex_id>", methods=["GET"])
+def api_get_connex(connex_id):
+    """GET /api/connex/<connex_id> -> {connex: Connex}"""
+    connex = _connex_store.load_connex(connex_id)
+    if connex is None:
+        return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
+    return jsonify({"connex": connex})
+
+
+@app.route("/api/connex/<connex_id>", methods=["PUT"])
+def api_update_connex(connex_id):
+    """
+    PUT /api/connex/<connex_id>  body: partial Connex
+    (boxes[].sloc, boxes[].shrh_poc, boxes[].individual_items,
+     sun, connex_no, seal_no, packed_by, signed_by, date)
+    -> {connex: Connex}
+    """
+    data = request.get_json(silent=True) or {}
+    connex = _connex_store.patch_connex(connex_id, data)
+    if connex is None:
+        return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
+    return jsonify({"connex": connex})
+
+
+@app.route("/api/connex/<connex_id>/attach", methods=["POST"])
+def api_attach_connex(connex_id):
+    """
+    POST /api/connex/<connex_id>/attach  body: {ingest_job_id}
+    -> {connex: Connex}
+    """
+    data = request.get_json(silent=True) or {}
+    ingest_job_id = data.get("ingest_job_id", "")
+    if not ingest_job_id:
+        return jsonify({"error": "ingest_job_id is required.", "code": "MISSING_FIELDS"}), 400
+    if ingest_job_id not in JOBS:
+        return jsonify({"error": f"Job '{ingest_job_id}' not found.", "code": "NOT_FOUND"}), 404
+
+    connex = _connex_store.attach_ingest_job(connex_id, ingest_job_id)
+    if connex is None:
+        return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
+    return jsonify({"connex": connex})
+
+
+@app.route("/api/connex/<connex_id>/assign", methods=["POST"])
+def api_assign_connex(connex_id):
+    """
+    POST /api/connex/<connex_id>/assign
+    body: {moves: [{bom_id, box_num} | {bom_id, separate:true} | {bom_id, exclude:true}]}
+
+    Wraps the existing packing.reassign / separate / exclude logic.
+    Reflects the new box→BOM mapping back into the connex JSON.
+    -> {connex: Connex}
+    """
+    connex = _connex_store.load_connex(connex_id)
+    if connex is None:
+        return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
+
+    ingest_job_id = connex.get("ingest_job_id")
+    if not ingest_job_id or ingest_job_id not in JOBS:
+        return jsonify({
+            "error": "This connex has no attached ingest job. Call /attach first.",
+            "code": "NO_JOB",
+        }), 400
+
+    data = request.get_json(silent=True) or {}
+    job  = JOBS[ingest_job_id]
+    boms = job["boms"]
+    box_map = job["box_map"]
+
+    for move in data.get("moves", []):
+        bom_id = move.get("bom_id")
+        bom = next((b for b in boms if b["bom_id"] == bom_id), None)
+
+        if move.get("exclude"):
+            if bom is None:
+                continue
+            box_map = dict(box_map)
+            for item in bom.get("items", []):
+                box_map.pop(packing.item_key(bom_id, item["line_no"]), None)
+            continue
+
+        if move.get("separate"):
+            if bom is None:
+                continue
+            occ = packing.occupied_boxes(box_map)
+            new_box = (max(occ) + 1) if occ else 1
+            for item in bom.get("items", []):
+                key = packing.item_key(bom_id, item["line_no"])
+                box_map = packing.reassign(box_map, key, new_box)
+            continue
+
+        target_box = move.get("box_num")
+        if target_box is None:
+            continue
+        target_box = int(target_box)
+
+        if bom is None:
+            continue
+        for item in bom.get("items", []):
+            key = packing.item_key(bom_id, item["line_no"])
+            box_map = packing.reassign(box_map, key, target_box)
+
+    # Persist updated box_map back into the in-memory job.
+    job["box_map"] = box_map
+
+    # Build bom_ids_by_box: {box_num: [bom_id, ...]}
+    bom_ids_by_box: dict[int, list[str]] = {}
+    for bom in boms:
+        rep = _representative_box(bom, box_map)
+        if rep is not None:
+            bom_ids_by_box.setdefault(rep, []).append(bom["bom_id"])
+
+    updated = _connex_store.apply_bom_assignments(connex_id, bom_ids_by_box)
+    if updated is None:
+        return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
+    return jsonify({"connex": updated})
+
+
+@app.route("/api/connex/<connex_id>/seal", methods=["POST"])
+def api_seal_connex(connex_id):
+    """
+    POST /api/connex/<connex_id>/seal
+    -> {ok: bool, errors: [str], connex: Connex}
+
+    Validates Contract B rules.  Returns 200 in all cases (including validation
+    failures) so the UI can surface field-level guidance without an HTTP error.
+    """
+    result = _connex_store.seal_connex(connex_id)
+    if result["connex"] is None:
+        return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
+    return jsonify(result)
+
+
+@app.route("/api/connex/<connex_id>/generate", methods=["POST"])
+def api_generate_connex(connex_id):
+    """
+    POST /api/connex/<connex_id>/generate
+    -> binary ZIP (one DD1750 PDF per box, battalion stamp applied)
+
+    Delegates to DD1750 agent's stamp-aware render.  While that agent is in
+    flight the route falls back to the existing generate_dd1750_from_items()
+    with standard header fields (no stamp).
+    """
+    connex = _connex_store.load_connex(connex_id)
+    if connex is None:
+        return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
+
+    ingest_job_id = connex.get("ingest_job_id")
+    if not ingest_job_id or ingest_job_id not in JOBS:
+        return jsonify({"error": "No attached ingest job.", "code": "NO_JOB"}), 400
+
+    job = JOBS[ingest_job_id]
+    boms = job["boms"]
+    box_map = job["box_map"]
+
+    # Load the profile for stamp + header defaults.
+    profile = _profiles.load_profile(connex.get("profile_id", "")) or {}
+
+    zip_buffer = io.BytesIO()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for box in connex.get("boxes", []):
+                box_num = box["box_num"]
+                items_raw = packing.items_for_box(boms, box_map, box_num)
+                if not items_raw:
+                    continue
+
+                bom_items = []
+                for it in items_raw:
+                    nsn_str = it.get("nsn", "") or ""
+                    sn = (it.get("serial_number") or "").strip()
+                    if sn:
+                        nsn_str = (nsn_str + "  SN: " + sn).strip() if nsn_str else "SN: " + sn
+                    bom_items.append(render_core.BomItem(
+                        line_no=it.get("line_no", 1),
+                        description=it.get("description", ""),
+                        nsn=nsn_str,
+                        qty=it.get("qty", 1),
+                        unit_of_issue=it.get("unit_of_issue", "EA"),
+                    ))
+
+                hdr = render_core.HeaderInfo(
+                    packed_by=connex.get("packed_by") or profile.get("default_packed_by", ""),
+                    num_boxes=str(connex.get("box_count", 1)),
+                    end_item=f"Box {box_num}",
+                    date=connex.get("date", ""),
+                    typed_name=connex.get("signed_by", ""),
+                    sloc=box.get("sloc", ""),
+                    shrh_poc=box.get("shrh_poc", ""),
+                    sun=connex.get("sun") or "[SUN PENDING]",
+                    connex_no=connex.get("connex_no") or "[CONNEX PENDING]",
+                    seal_no=connex.get("seal_no") or "[SEAL PENDING]",
+                    stamp_text=profile.get("stamp_text", ""),
+                )
+
+                # TODO(DD1750 agent): replace this call with stamp-aware render
+                # once sitrep_render.generate_stamped_box_pdf(bom_items, TEMPLATE_PDF,
+                # out_path, header=hdr) is available.  That function should accept the
+                # same bom_items list and HeaderInfo and apply the battalion stamp.
+                # Fallback: use existing generate_dd1750_from_items (no stamp).
+                out_fd, out_path = tempfile.mkstemp(suffix=".pdf", dir=tmpdir)
+                os.close(out_fd)
+                render_core.generate_dd1750_from_items(
+                    bom_items,
+                    TEMPLATE_PDF,
+                    out_path,
+                    header=hdr,
+                    draw_master_header_fn=render_core.draw_master_header,
+                )
+
+                zip_name = f"Box_{box_num:03d}.pdf"
+                with open(out_path, "rb") as fh:
+                    zf.writestr(zip_name, fh.read())
+
+    zip_buffer.seek(0)
+    connex_label = re.sub(r'[^\w\-]', '_', connex.get("connex_no") or connex_id)[:40]
+    return send_file(
+        zip_buffer,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"Connex_{connex_label}_DD1750s.zip",
+    )
+
+
+# ---------------------------------------------------------------------------
+# SITREP routes  (Contract A §SITREP, Contract C)
+# ---------------------------------------------------------------------------
+
+def _resolve_connexes_for_sitrep(data: dict) -> tuple[list[dict], dict | None]:
+    """
+    Resolve the connex list + profile from request body.
+
+    Accepts {connex_ids: [...]} OR {profile_id: "..."}.
+    Returns (connexes, profile_dict_or_None).
+    """
+    connex_ids = data.get("connex_ids")
+    profile_id = data.get("profile_id")
+    profile = None
+
+    if connex_ids:
+        connexes = [c for c in (_connex_store.load_connex(cid) for cid in connex_ids) if c]
+        if connexes:
+            pid = connexes[0].get("profile_id")
+            if pid:
+                profile = _profiles.load_profile(pid)
+    elif profile_id:
+        profile = _profiles.load_profile(profile_id)
+        connexes = []
+        if os.path.isdir(_connex_store.CONNEXES_DIR):
+            for fname in os.listdir(_connex_store.CONNEXES_DIR):
+                if not fname.endswith(".json"):
+                    continue
+                try:
+                    with open(os.path.join(_connex_store.CONNEXES_DIR, fname), encoding="utf-8") as fh:
+                        cx = json.load(fh)
+                    if cx.get("profile_id") == profile_id:
+                        connexes.append(cx)
+                except (json.JSONDecodeError, OSError):
+                    continue
+    else:
+        connexes = []
+
+    return connexes, profile
+
+
+@app.route("/api/sitrep", methods=["POST"])
+def api_sitrep():
+    """
+    POST /api/sitrep  body: {connex_ids:[...]} OR {profile_id}
+    -> {sitrep: Sitrep}
+    """
+    data = request.get_json(silent=True) or {}
+    connexes, profile = _resolve_connexes_for_sitrep(data)
+
+    # Enrich BOM nomenclature from in-memory job data where available.
+    boms_by_id: dict[str, dict] = {}
+    for cx in connexes:
+        jid = cx.get("ingest_job_id")
+        if jid and jid in JOBS:
+            for bom in JOBS[jid].get("boms", []):
+                boms_by_id[bom["bom_id"]] = bom
+
+    sitrep = _sitrep.build_sitrep(connexes, profile=profile)
+    if boms_by_id:
+        sitrep = _sitrep.enrich_sitrep_boms(sitrep, boms_by_id)
+
+    return jsonify({"sitrep": sitrep})
+
+
+@app.route("/api/sitrep/pdf", methods=["POST"])
+def api_sitrep_pdf():
+    """
+    POST /api/sitrep/pdf  body: same as /api/sitrep
+    -> binary PDF
+
+    TODO(DD1750 agent): replace this stub with a call to
+    sitrep_render.render_sitrep_pdf(sitrep_dict) once available.
+    That function should accept the Contract C dict and return raw PDF bytes.
+
+    Stub returns the JSON as a plain-text "PDF" so downstream agents can wire
+    the real render without breaking the route contract.
+    """
+    data = request.get_json(silent=True) or {}
+    connexes, profile = _resolve_connexes_for_sitrep(data)
+
+    boms_by_id: dict[str, dict] = {}
+    for cx in connexes:
+        jid = cx.get("ingest_job_id")
+        if jid and jid in JOBS:
+            for bom in JOBS[jid].get("boms", []):
+                boms_by_id[bom["bom_id"]] = bom
+
+    sitrep = _sitrep.build_sitrep(connexes, profile=profile)
+    if boms_by_id:
+        sitrep = _sitrep.enrich_sitrep_boms(sitrep, boms_by_id)
+
+    # TODO(DD1750 agent): swap this block for the real render call:
+    #   import sitrep_render
+    #   pdf_bytes = sitrep_render.render_sitrep_pdf(sitrep)
+    # Expected interface: sitrep_render.render_sitrep_pdf(sitrep: dict) -> bytes
+    pdf_bytes = json.dumps(sitrep, indent=2).encode("utf-8")
+
+    return send_file(
+        io.BytesIO(pdf_bytes),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name="SITREP.pdf",
+    )
