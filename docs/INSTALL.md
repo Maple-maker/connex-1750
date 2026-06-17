@@ -10,7 +10,7 @@ Audience: developer or S6 admin setting up the tool on a local machine.
 - pip
 - A terminal with git access to the repo
 
-No Node.js, no webpack, no build step. three.js loads from CDN at runtime.
+No Node.js, no webpack, no build step. three.js loads from CDN at runtime and is used only for the read-only sealed-connex review at Step 5. The packing workflow (Step 3) is entirely 2D and requires no WebGL.
 
 ---
 
@@ -108,16 +108,18 @@ All tests must pass (73 legacy + 59 new = 132+ total). If any test fails, do not
 
 ---
 
-## 8. Verify the 3D module
+## 8. Verify the 3D review module
 
-The three.js connex scene loads from CDN. Verify it with the isolated harness:
+The three.js scene is used only at Step 5 (Review & Seal). Verify it with the isolated harness:
 
 1. Start the server (`python3 app.py`).
 2. Open http://localhost:8000/static/connex3d/_harness.html
 3. Click "openConnex()" → doors swing open.
 4. Click "setBoxCount(8)" → 8 boxes appear inside.
 
-If the harness shows a WebGL error, the browser lacks WebGL support. The main app automatically falls back to a list-table view — the workflow still works without 3D.
+If the harness shows a WebGL error, the browser lacks WebGL support. Step 5 in the main app automatically falls back to the per-box checklist view — the workflow still completes without 3D.
+
+**Note on insignia assets:** The brigade gallery (Step 1) contains 97 formation insignia. Assets are downscaled for fast loading on constrained networks and lazy-load in the gallery view. On a slow connection the gallery may take a few seconds to populate; the app is fully functional once the profile is saved.
 
 ---
 
@@ -140,6 +142,8 @@ All component classes and box-state badges should render with the dark/gold comm
 
 **PDF generation fails with reportlab error:** Confirm reportlab 4.0.7 is installed (`pip show reportlab`).
 
-**3D scene blank / no WebGL:** Use the list-table view (toggle button in center panel). The workflow is fully functional without 3D.
+**3D review blank / no WebGL:** The Step 5 per-box checklist still works — confirm each box and click "Apply Brigade Stamp & Seal" to download the ZIP. The 3D view is visual-only.
 
-**BOM ingest data lost after restart:** The in-memory `JOBS` dict does not survive a process restart. Re-upload BOM PDFs after any restart. This is by design for the single-worker deploy model.
+**BOM ingest data lost after restart:** The in-memory `JOBS` dict does not survive a process restart. Re-upload BOM PDFs after any restart. Connex and profile JSON files are persisted to disk and survive restarts.
+
+**Gallery images slow to load:** Insignia assets are downscaled and lazy-loaded. On very constrained networks, wait for the gallery to populate before selecting a formation. The profile can always be edited after initial save.

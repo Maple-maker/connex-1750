@@ -8,6 +8,8 @@ Audience: admin deploying to Railway for the first time or troubleshooting a bro
 
 The tool ships as a single Python process: one gunicorn worker running the Flask app. No database, no message queue, no separate frontend build. The `data/` directory is the only stateful artifact — it lives on the Railway volume if persistence is configured (see §4).
 
+The brigade insignia gallery (~97 formation images) is bundled under `static/formations/`. Assets are downscaled for fast loading on constrained networks and lazy-load in the gallery view at Step 1.
+
 ---
 
 ## Files that control the deploy
@@ -50,7 +52,9 @@ Health check: `GET /api/health` → `{"status":"ok"}`. Deploy is marked healthy 
 
 `Procfile` specifies `--workers 2` but the in-memory `JOBS` dict is process-local. If Railway runs two workers and two requests land on different workers, BOM ingest state will not be shared.
 
-**For this tool, set `--workers 1` in a custom start command or reduce worker count in Railway:**
+**For this tool, use `--workers 1`:**
+
+Set a custom start command in Railway → your service → Settings → Custom Start Command:
 
 ```
 gunicorn app:app --bind 0.0.0.0:$PORT --timeout 300 --workers 1
@@ -109,7 +113,7 @@ Without a volume, operators must re-create their profile and re-ingest BOMs afte
 | POST | `/api/connex/<connex_id>/attach` | `{ingest_job_id}` | `{connex: Connex}` |
 | POST | `/api/connex/<connex_id>/assign` | `{moves: [{bom_id, box_num} OR {bom_id, separate} OR {bom_id, exclude}]}` | `{connex: Connex}` |
 | POST | `/api/connex/<connex_id>/seal` | — | `{ok: bool, errors: [str], connex: Connex}` — always HTTP 200 |
-| POST | `/api/connex/<connex_id>/generate` | — | Binary ZIP (one DD1750 PDF per occupied box) |
+| POST | `/api/connex/<connex_id>/generate` | — | Binary ZIP (Master_1750.pdf + one DD1750 PDF per occupied box) |
 
 #### SITREP
 
