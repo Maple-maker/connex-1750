@@ -90,6 +90,143 @@
 
   /* Legacy wrap */
   #legacy-wrap { padding-top: var(--space-4); }
+
+  /* ── Tutorial overlay ─────────────────────────────────────── */
+
+  /* Backdrop dim */
+  #cx-tutorial-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.72);
+    z-index: 900;
+    /* Fade in */
+    animation: tutFadeIn 0.18s ease;
+  }
+  #cx-tutorial-backdrop.cx-tutorial--open { display: flex; align-items: center; justify-content: center; }
+  @keyframes tutFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  /* Glass card */
+  #cx-tutorial-modal {
+    position: relative;
+    width: min(560px, 94vw);
+    max-height: min(640px, 90vh);
+    overflow-y: auto;
+    background: rgba(22, 25, 35, 0.88);
+    border: 1px solid rgba(212, 175, 55, 0.25);
+    border-radius: var(--radius-lg, 12px);
+    box-shadow: 0 24px 80px rgba(0,0,0,0.7);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    padding: var(--space-6, 32px) var(--space-6, 32px) var(--space-5, 24px);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4, 16px);
+  }
+
+  /* Close × in corner */
+  #cx-tutorial-close {
+    position: absolute;
+    top: var(--space-3, 12px);
+    right: var(--space-4, 16px);
+    background: none;
+    border: none;
+    color: var(--connex-gray, #8892a4);
+    font-size: 1.3rem;
+    cursor: pointer;
+    line-height: 1;
+    padding: 4px 6px;
+    border-radius: 4px;
+    transition: color 0.15s;
+  }
+  #cx-tutorial-close:hover { color: var(--connex-gold, #d4af37); }
+
+  /* Step badge above heading */
+  .cx-tut__step-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--connex-gold, #d4af37);
+    background: rgba(212,175,55,0.12);
+    border: 1px solid rgba(212,175,55,0.25);
+    border-radius: 20px;
+    padding: 2px 10px;
+    margin-bottom: var(--space-2, 8px);
+  }
+
+  /* Slide heading */
+  .cx-tut__heading {
+    font-size: var(--text-lg, 1.15rem);
+    font-weight: 700;
+    color: #fff;
+    margin: 0 0 var(--space-2, 8px);
+  }
+
+  /* Slide body text */
+  .cx-tut__body {
+    font-size: var(--text-sm, 0.875rem);
+    color: var(--connex-light, #c5cad8);
+    line-height: 1.65;
+    margin: 0;
+  }
+
+  /* Dot indicators */
+  #cx-tutorial-dots {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    margin-top: var(--space-2, 8px);
+  }
+  .cx-tut__dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.2);
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.2s;
+  }
+  .cx-tut__dot--active { background: var(--connex-gold, #d4af37); }
+
+  /* Nav row */
+  #cx-tutorial-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3, 12px);
+    margin-top: var(--space-2, 8px);
+  }
+  #cx-tutorial-skip {
+    background: none;
+    border: none;
+    color: var(--connex-gray, #8892a4);
+    font-size: var(--text-sm, 0.875rem);
+    cursor: pointer;
+    padding: 0;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  #cx-tutorial-skip:hover { color: var(--connex-light, #c5cad8); }
+
+  /* Header tutorial button */
+  #cx-tutorial-reopen {
+    margin-left: auto;
+    background: rgba(212,175,55,0.12);
+    border: 1px solid rgba(212,175,55,0.3);
+    color: var(--connex-gold, #d4af37);
+    border-radius: var(--radius-sm, 6px);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s;
+    align-self: center;
+  }
+  #cx-tutorial-reopen:hover { background: rgba(212,175,55,0.22); }
 </style>
 </head>
 <body>
@@ -104,7 +241,39 @@
     <span class="cx-banner__unit">CONNEX 1750</span>
     <span class="cx-banner__sub">Loading…</span>
   </span>
+  <!-- Tutorial reopen button — always visible in header -->
+  <button id="cx-tutorial-reopen" onclick="openTutorial()" aria-label="How it works tutorial">
+    &#9654; How it works
+  </button>
 </header>
+
+<!-- ============================================================
+     TUTORIAL OVERLAY — shown on first load; reopenable via header.
+     Managed entirely by tutorialInit() / openTutorial() in app.js.
+     ============================================================ -->
+<div id="cx-tutorial-backdrop" role="dialog" aria-modal="true" aria-label="App tutorial"
+     onclick="handleTutorialBackdropClick(event)">
+  <div id="cx-tutorial-modal">
+    <button id="cx-tutorial-close" onclick="closeTutorial()" aria-label="Close tutorial">&times;</button>
+
+    <!-- Slide content — injected by renderTutorialSlide() -->
+    <div id="cx-tutorial-slide" style="flex:1;"></div>
+
+    <!-- Dot indicators -->
+    <div id="cx-tutorial-dots" aria-hidden="true"></div>
+
+    <!-- Navigation -->
+    <div id="cx-tutorial-nav">
+      <button id="cx-tutorial-skip" onclick="closeTutorial()">Skip</button>
+      <div style="display:flex;gap:var(--space-2,8px);">
+        <button class="cx-btn cx-btn--ghost cx-btn--sm" id="cx-tutorial-back"
+                onclick="tutorialBack()" style="display:none;">&#8592; Back</button>
+        <button class="cx-btn cx-btn--primary cx-btn--sm" id="cx-tutorial-next"
+                onclick="tutorialNext()">Next &#8594;</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- ============================================================
      MAIN — 3-column layout (.cx-layout per Contract E)

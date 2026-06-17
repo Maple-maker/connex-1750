@@ -1296,8 +1296,183 @@ function todayLabel() {
 }
 
 /* =========================================================
+ * TUTORIAL — first-load onboarding carousel.
+ *
+ * Gate:  localStorage key "connex_tutorial_v1_seen".
+ *        Set on close/skip/get-started. Not set = show on load.
+ * Reopen: "How it works" button in header calls openTutorial().
+ * Keys:  ArrowRight/ArrowLeft navigate; Escape closes.
+ * Focus: trapped inside modal while open.
+ * ========================================================= */
+const TUTORIAL_STORAGE_KEY = "connex_tutorial_v1_seen";
+
+const TUTORIAL_SLIDES = [
+  {
+    badge: "Welcome",
+    heading: "CONNEX 1750",
+    body: "CONNEX 1750 turns your packing job into finished DD1750s. Pack your BOMs into boxes inside a connex, then get a master 1750 + a 1750 for every box, plus a commander’s SITREP.",
+  },
+  {
+    badge: "Step 1",
+    heading: "Profile",
+    body: "Pick your brigade from the insignia gallery. It personalizes the app and saves your unit so you can reuse it next time.",
+  },
+  {
+    badge: "Step 2",
+    heading: "Connex Setup",
+    body: "Name your connex and choose how many boxes you’re packing.",
+  },
+  {
+    badge: "Step 3",
+    heading: "Packing",
+    body: "Drag a BOM from the pool onto a box — or click the BOM, then click a box. Give each box its SLOC and SHRH POC. Add any loose individual items right to a box. A box turns green when it’s complete.",
+  },
+  {
+    badge: "Step 4",
+    heading: "Seal Data",
+    body: "Enter your SUN #, CONNEX #, and SEAL # (leave blank to print a placeholder), plus who packed and who signs. Tap the ? on any field for help — SEAL # and CONNEX # show a photo of where to read the number.",
+  },
+  {
+    badge: "Step 5",
+    heading: "Review & Seal",
+    body: "Do a final visual check of the packed connex and the box checklist, then apply your brigade stamp to seal it and download your 1750s.",
+  },
+  {
+    badge: "Step 6",
+    heading: "Next / SITREP",
+    body: "Pack another connex under the same profile, or finish and generate the commander’s SITREP across everything you packed.",
+  },
+];
+
+let _tutIdx = 0;
+
+/* Render the current slide into #cx-tutorial-slide */
+function renderTutorialSlide() {
+  const slide = TUTORIAL_SLIDES[_tutIdx];
+  const last  = _tutIdx === TUTORIAL_SLIDES.length - 1;
+  const total = TUTORIAL_SLIDES.length;
+
+  /* Slide content */
+  const slideEl = $("cx-tutorial-slide");
+  if (slideEl) {
+    slideEl.innerHTML = `
+      <span class="cx-tut__step-badge">${esc(slide.badge)}</span>
+      <h2 class="cx-tut__heading">${esc(slide.heading)}</h2>
+      <p  class="cx-tut__body">${esc(slide.body)}</p>`;
+  }
+
+  /* Dot indicators */
+  const dotsEl = $("cx-tutorial-dots");
+  if (dotsEl) {
+    dotsEl.innerHTML = TUTORIAL_SLIDES.map((_, i) =>
+      `<button class="cx-tut__dot${i === _tutIdx ? " cx-tut__dot--active" : ""}"
+               aria-label="Slide ${i + 1} of ${total}"
+               onclick="tutorialGoTo(${i})"></button>`
+    ).join("");
+  }
+
+  /* Back button visibility */
+  const backBtn = $("cx-tutorial-back");
+  if (backBtn) backBtn.style.display = _tutIdx > 0 ? "" : "none";
+
+  /* Next vs Get Started */
+  const nextBtn = $("cx-tutorial-next");
+  if (nextBtn) {
+    nextBtn.textContent = last ? "Get Started →" : "Next →";
+  }
+
+  /* Skip link: hide on last slide (replaced by Get Started) */
+  const skipBtn = $("cx-tutorial-skip");
+  if (skipBtn) skipBtn.style.visibility = last ? "hidden" : "visible";
+}
+
+function openTutorial() {
+  _tutIdx = 0;
+  renderTutorialSlide();
+  const backdrop = $("cx-tutorial-backdrop");
+  if (backdrop) backdrop.classList.add("cx-tutorial--open");
+  /* Trap focus — move to the modal */
+  const modal = $("cx-tutorial-modal");
+  if (modal) {
+    /* Find first focusable element */
+    const first = modal.querySelector("button, [tabindex]");
+    if (first) setTimeout(() => first.focus(), 50);
+  }
+  document.addEventListener("keydown", _tutorialKeyHandler);
+}
+
+function closeTutorial() {
+  const backdrop = $("cx-tutorial-backdrop");
+  if (backdrop) backdrop.classList.remove("cx-tutorial--open");
+  document.removeEventListener("keydown", _tutorialKeyHandler);
+  /* Mark seen so it won't auto-show again */
+  try { localStorage.setItem(TUTORIAL_STORAGE_KEY, "1"); } catch (_) {}
+}
+
+window.openTutorial  = openTutorial;
+window.closeTutorial = closeTutorial;
+
+window.tutorialNext = function() {
+  if (_tutIdx < TUTORIAL_SLIDES.length - 1) {
+    _tutIdx++;
+    renderTutorialSlide();
+  } else {
+    closeTutorial();
+  }
+};
+
+window.tutorialBack = function() {
+  if (_tutIdx > 0) { _tutIdx--; renderTutorialSlide(); }
+};
+
+window.tutorialGoTo = function(idx) {
+  _tutIdx = idx;
+  renderTutorialSlide();
+};
+
+/* Close if backdrop itself (not modal) was clicked */
+window.handleTutorialBackdropClick = function(e) {
+  if (e.target === $("cx-tutorial-backdrop")) closeTutorial();
+};
+
+/* Keyboard handler (attached on open, removed on close) */
+function _tutorialKeyHandler(e) {
+  if (e.key === "Escape")     { closeTutorial(); return; }
+  if (e.key === "ArrowRight") { window.tutorialNext(); return; }
+  if (e.key === "ArrowLeft")  { window.tutorialBack(); return; }
+
+  /* Basic focus trap — keep Tab inside the modal */
+  if (e.key === "Tab") {
+    const modal     = $("cx-tutorial-modal");
+    if (!modal) return;
+    const focusable = [...modal.querySelectorAll(
+      'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    )];
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last  = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault(); last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault(); first.focus();
+    }
+  }
+}
+
+/* Auto-show on first load if not yet seen */
+function tutorialInit() {
+  let seen = false;
+  try { seen = !!localStorage.getItem(TUTORIAL_STORAGE_KEY); } catch (_) {}
+  if (!seen) openTutorial();
+}
+
+/* =========================================================
  * INIT
  * ========================================================= */
 document.addEventListener("DOMContentLoaded", () => {
   renderAll();
+  tutorialInit();
+  window.addEventListener("resize", () => {
+    if (STATE.scene) STATE.scene.resize();
+  });
 });
