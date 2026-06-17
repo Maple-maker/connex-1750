@@ -66,13 +66,17 @@
     vertical-align: middle;
   }
   .cx-bom-table th {
-    background: var(--connex-panel-2);
-    color: var(--connex-light);
+    background: rgba(212, 191, 145, 0.07);
+    color: var(--connex-gold);
+    font-family: var(--font-display);
     font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
     white-space: nowrap;
   }
   .cx-bom-table tr:hover td {
-    background: rgba(255,255,255,0.02);
+    background: rgba(212, 191, 145, 0.04);
   }
 
   /* Inline label tags for LIN / SN / NSN */
@@ -154,9 +158,10 @@
   /* Step badge above heading */
   .cx-tut__step-badge {
     display: inline-block;
+    font-family: var(--font-display, sans-serif);
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--connex-gold, #d4af37);
     background: rgba(212,175,55,0.12);
@@ -168,8 +173,10 @@
 
   /* Slide heading */
   .cx-tut__heading {
-    font-size: var(--text-lg, 1.15rem);
+    font-family: var(--font-display, sans-serif);
+    font-size: var(--text-lg, 1.5rem);
     font-weight: 700;
+    letter-spacing: 0.02em;
     color: #fff;
     margin: 0 0 var(--space-2, 8px);
   }
@@ -223,17 +230,20 @@
 
   /* Header tutorial button */
   #cx-tutorial-reopen {
-    margin-left: auto;
+    margin-left: 0;
     background: rgba(212,175,55,0.12);
     border: 1px solid rgba(212,175,55,0.3);
     color: var(--connex-gold, #d4af37);
     border-radius: var(--radius-sm, 6px);
+    font-family: var(--font-display, sans-serif);
     font-size: 12px;
     font-weight: 600;
-    padding: 4px 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 5px 14px;
     cursor: pointer;
     white-space: nowrap;
-    transition: background 0.15s;
+    transition: background 0.15s, box-shadow 0.15s;
     align-self: center;
   }
   #cx-tutorial-reopen:hover { background: rgba(212,175,55,0.22); }
@@ -244,12 +254,18 @@
 <!-- ============================================================
      TOP — Unit banner (driven by app.js: renderBanner())
      ============================================================ -->
-<header class="cx-banner" id="cx-banner" style="padding: var(--space-3) var(--space-6);">
-  <!-- renderBanner() populates this -->
-  <span class="cx-banner__emblem">&#x1F4E6;</span>
-  <span class="cx-banner__body">
-    <span class="cx-banner__unit">CRATE</span>
-    <span class="cx-banner__sub">Loading…</span>
+<header class="cx-banner">
+  <!-- renderBanner() rewrites ONLY #cx-banner so the chrome below survives -->
+  <div id="cx-banner" class="cx-banner__content">
+    <span class="cx-banner__emblem">&#x1F4E6;</span>
+    <span class="cx-banner__body">
+      <span class="cx-banner__unit">CRATE</span>
+      <span class="cx-banner__sub">Loading…</span>
+    </span>
+  </div>
+  <!-- Live status chip -->
+  <span class="cx-banner__status" aria-hidden="true">
+    <span class="cx-banner__status-dot"></span>SYSTEM ONLINE
   </span>
   <!-- Tutorial reopen button — always visible in header -->
   <button id="cx-tutorial-reopen" onclick="openTutorial()" aria-label="How it works tutorial">

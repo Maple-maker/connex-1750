@@ -8,12 +8,13 @@
  * older browsers, and breaks WebGL compositing for the 3D connex canvas.
  */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
   /* ── core palette ─────────────────────────────────────── */
   --connex-gold:  #D4BF91;   /* primary accent, complete state, key CTAs */
   --connex-gray:  #B2B4B3;   /* container body, neutral text             */
+  --connex-light: #E9EAEC;   /* bright text on dark panels (titles/values)*/
   --connex-black: #0E0F11;   /* command-center base background           */
 
   /* ── surfaces (solid RGBA — no backdrop-filter) ──────── */
@@ -32,7 +33,8 @@
   /* selected ring uses --connex-gold (Contract E §7)        */
 
   /* ── typography ───────────────────────────────────────── */
-  --font-ui:   'Inter', system-ui, -apple-system, sans-serif;
+  --font-display: 'Chakra Petch', system-ui, sans-serif;  /* HUD headings, labels, CTAs */
+  --font-ui:   'IBM Plex Sans', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace; /* IDs, NSN/LIN, codes */
 
   /* ── type scale ───────────────────────────────────────── */
@@ -61,6 +63,14 @@
   --shadow-sm:  0 2px 8px rgba(0, 0, 0, 0.45);
   --shadow-md:  0 4px 20px rgba(0, 0, 0, 0.6);
   --shadow-gold: 0 0 0 1px var(--connex-stroke), 0 4px 24px rgba(212, 191, 145, 0.08);
+
+  /* ── atmosphere (command-center surfaces & glows) ─────── */
+  --connex-ink:    #08090B;                          /* deepest base behind panels */
+  --panel-grad:    linear-gradient(160deg, rgb(26, 29, 33) 0%, rgb(18, 20, 23) 100%);
+  --panel-grad-2:  linear-gradient(160deg, rgb(38, 42, 48) 0%, rgb(28, 31, 36) 100%);
+  --glow-gold:     0 0 24px rgba(212, 191, 145, 0.18);
+  --inner-hi:      inset 0 1px 0 rgba(255, 255, 255, 0.04);  /* top edge catch-light */
+  --grid-line:     rgba(212, 191, 145, 0.045);              /* faint HUD grid */
 
   /* ── z-index scale ─────────────────────────────────────  */
   --z-base:    10;
