@@ -56,6 +56,7 @@ def _empty_box(box_num: int) -> dict:
     """Return a canonical empty box dict for box number box_num."""
     return {
         "box_num": box_num,
+        "label": "",
         "bom_ids": [],
         "sloc": "",
         "shrh_poc": "",
@@ -150,7 +151,7 @@ def patch_connex(connex_id: str, patch: dict) -> dict | None:
             if box_num is None or box_num not in box_by_num:
                 continue
             box = box_by_num[box_num]
-            for field in ("sloc", "shrh_poc"):
+            for field in ("label", "sloc", "shrh_poc"):
                 if field in box_patch:
                     box[field] = box_patch[field]
             if "individual_items" in box_patch:

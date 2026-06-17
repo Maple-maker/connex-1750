@@ -906,6 +906,23 @@ def api_assign_connex(connex_id):
     warnings: list[str] = []
 
     for move in data.get("moves", []):
+        # Item-level move: relocate a single component item (bom_id:line_no)
+        # into a box, independent of the rest of its BOM.  Used by the BOM
+        # drill-down in the packing UI (note #2).
+        if "item_key" in move:
+            target_box = move.get("box_num")
+            if target_box is None:
+                continue
+            target_box = int(target_box)
+            if target_box < 1 or target_box > box_count:
+                warnings.append(
+                    f"item {move['item_key']!r} targets box {target_box} which is "
+                    f"out of range (connex has {box_count} boxes) — skipped"
+                )
+                continue
+            box_map = packing.reassign(box_map, move["item_key"], target_box)
+            continue
+
         bom_id = move.get("bom_id")
         bom = next((b for b in boms if b["bom_id"] == bom_id), None)
 
@@ -959,7 +976,9 @@ def api_assign_connex(connex_id):
     updated = _connex_store.apply_bom_assignments(connex_id, bom_ids_by_box)
     if updated is None:
         return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
-    return jsonify({"connex": updated, "warnings": warnings})
+    # item_box_map (item_key -> box_num) lets the UI render per-item box
+    # assignment inside the BOM drill-down.
+    return jsonify({"connex": updated, "warnings": warnings, "item_box_map": box_map})
 
 
 @app.route("/api/connex/<connex_id>/seal", methods=["POST"])

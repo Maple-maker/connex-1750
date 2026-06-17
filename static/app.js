@@ -24,18 +24,21 @@ let STATE = {
   connex: null,
   job_id: null,
   boms: [],
+  itemBoxMap: {},      // item_key ("bom_id:line_no") -> box_num, from /assign
+  openBoms: {},        // bom_id -> true when its drill-down is expanded
   sessionConnexIds: [],
   sitrep: null,
 };
 
-const STEPS = ["PROFILE", "CONNEX_SETUP", "PACKING", "SEAL_DATA", "REVIEW_SEAL", "NEXT_SITREP"];
+const STEPS = ["PROFILE", "CONNEX_SETUP", "PACKING", "BOX_STATUS", "SEAL_DATA", "REVIEW_SEAL", "NEXT_SITREP"];
 
 const STEP_LABELS = {
   PROFILE:      { label: "Profile",        sub: "Choose brigade / battalion" },
   CONNEX_SETUP: { label: "Connex Setup",   sub: "Name container, set box count" },
-  PACKING:      { label: "Packing",        sub: "Assign BOMs to boxes" },
+  PACKING:      { label: "Packing",        sub: "Assign items to boxes" },
+  BOX_STATUS:   { label: "Box Status",     sub: "Label, SLOC/POC, audit" },
   SEAL_DATA:    { label: "Seal Data",      sub: "SUN, CONNEX #, SEAL #, signers" },
-  REVIEW_SEAL:  { label: "Review & Seal",  sub: "3D review + apply stamp" },
+  REVIEW_SEAL:  { label: "Review & Seal",  sub: "Final check + apply stamp" },
   NEXT_SITREP:  { label: "Next / SITREP",  sub: "Another connex or finish" },
 };
 
@@ -109,9 +112,12 @@ function guardTransition(to) {
     case "PACKING":
       if (!s.connex) return "Create a connex first.";
       break;
+    case "BOX_STATUS":
+      if (!s.connex) return "Create a connex first.";
+      break;
     case "SEAL_DATA":
       if (!s.connex) return "No connex loaded.";
-      if (!allBoxesHaveRequiredFields()) return "Every populated box needs SLOC and SHRH POC before sealing.";
+      if (!allBoxesHaveRequiredFields()) return "Every populated box needs SLOC and SHRH POC. Finish them on the Box Status page.";
       break;
     case "REVIEW_SEAL":
       if (!s.connex) return "No connex loaded.";
@@ -220,6 +226,7 @@ function renderStepPanel() {
     case "PROFILE":      renderProfileStep(center, right); break;
     case "CONNEX_SETUP": renderConnexSetupStep(center, right); break;
     case "PACKING":      renderPackingStep(center, right); break;
+    case "BOX_STATUS":   renderBoxStatusStep(center, right); break;
     case "SEAL_DATA":    renderSealDataStep(center, right); break;
     case "REVIEW_SEAL":  renderReviewSealStep(center, right); break;
     case "NEXT_SITREP":  renderNextSitrepStep(center, right); break;
@@ -544,14 +551,18 @@ function renderPackingStep(center, right) {
     <div class="cx-panel" style="margin-bottom:var(--space-3);">
       <h3 class="cx-panel__title cx-section-title">BOM Assignment</h3>
       ${hasBoms
-        ? `<div style="overflow-x:auto;">
+        ? `<p class="cx-field-hint" style="margin-bottom:var(--space-2);">
+             Assign each end item to a box. Click <strong>&#9656;</strong> to drop down its
+             subitems and assign them individually.</p>
+           <div style="overflow-x:auto;">
              <table class="cx-bom-table">
                <thead><tr>
+                 <th></th>
                  <th>#</th>
                  <th>Nomenclature</th>
                  <th>LIN</th>
                  <th>SN</th>
-                 <th>Items</th>
+                 <th>Subitems</th>
                  <th>Assign to Box</th>
                </tr></thead>
                <tbody id="bom-table-body">${renderBomTableRows()}</tbody>
@@ -594,15 +605,15 @@ function renderPackingStep(center, right) {
     </div>
 
     <div style="display:flex;gap:var(--space-3);margin-top:var(--space-4);">
-      <button class="cx-btn cx-btn--primary" onclick="goTo('SEAL_DATA')">Seal Data &rarr;</button>
+      <button class="cx-btn cx-btn--primary" onclick="goTo('BOX_STATUS')">Box Status &rarr;</button>
     </div>
     <div id="packing-advance-error" role="alert" class="cx-field-error-msg" style="display:none;margin-top:var(--space-2);"></div>`;
 
   if (right) right.innerHTML = `
     <div class="cx-panel" style="margin-bottom:var(--space-3);">
-      <h3 class="cx-panel__title">Box Status</h3>
-      <p class="cx-field-hint" style="margin-bottom:var(--space-2);">Fill in SLOC and SHRH POC for each occupied box.</p>
-      <div id="packing-boxes">${renderBoxCards()}</div>
+      <h3 class="cx-panel__title">Box Contents</h3>
+      <p class="cx-field-hint" style="margin-bottom:var(--space-2);">Label boxes and add SLOC / SHRH POC on the next page.</p>
+      <div id="packing-boxes">${renderBoxSummaryCards()}</div>
     </div>
     <div class="cx-panel">
       <h3 class="cx-panel__title">Progress</h3>
@@ -621,48 +632,152 @@ function renderBomTableRows() {
     ].join('');
     const lin = bom.lin || '';
     const sn  = bom.serial_number || '';
+    const items = bom.items || [];
+    const expander = items.length
+      ? `<button class="cx-bom-expander" aria-label="Show subitems"
+                 onclick="toggleBomItems('${esc(bom.bom_id)}')"
+                 id="exp-${esc(bom.bom_id)}"
+                 style="background:none;border:none;color:var(--connex-gold);cursor:pointer;font-size:0.9rem;padding:0 4px;">&#9656;</button>`
+      : '';
     return `<tr>
+      <td style="text-align:center;width:24px;">${expander}</td>
       <td style="color:var(--connex-gray);font-size:var(--text-xs);">${idx + 1}</td>
       <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(bom.nomenclature || bom.filename)}">${esc(bom.nomenclature || bom.filename)}</td>
       <td class="cx-mono"><span class="cx-label-tag">LIN</span>${esc(lin || '—')}</td>
       <td class="cx-mono"><span class="cx-label-tag">SN</span>${esc(sn || '—')}</td>
-      <td style="text-align:center;">${esc(String(bom.item_count || 0))}</td>
+      <td style="text-align:center;">${esc(String(bom.item_count || items.length || 0))}</td>
       <td>
         <select class="cx-field" style="min-width:120px;padding:4px 6px;font-size:var(--text-xs);"
                 onchange="assignBomToBoxFromSelect('${esc(bom.bom_id)}', this.value)">
           ${boxOptions}
         </select>
       </td>
+    </tr>
+    <tr id="items-${esc(bom.bom_id)}" style="display:${STATE.openBoms[bom.bom_id] ? '' : 'none'};">
+      <td></td>
+      <td colspan="6" style="padding:0;">
+        ${renderBomItemRows(bom)}
+      </td>
     </tr>`;
   }).join('');
 }
 
-function renderBoxCards() {
+/* Drill-down: subitems of one BOM, each independently assignable to a box. */
+function renderBomItemRows(bom) {
+  const items = bom.items || [];
+  if (!items.length) return '<div class="cx-field-hint" style="padding:var(--space-2);">No subitems.</div>';
+  const boxesFor = (key) => {
+    const cur = STATE.itemBoxMap[key];
+    return [
+      `<option value="">— Unassigned —</option>`,
+      ...((STATE.connex && STATE.connex.boxes) || []).map(b =>
+        `<option value="${b.box_num}" ${cur === b.box_num ? 'selected' : ''}>Box ${b.box_num}</option>`)
+    ].join('');
+  };
+  const rows = items.map(it => {
+    const key = `${bom.bom_id}:${it.line_no}`;
+    return `<tr>
+      <td style="text-align:center;color:var(--connex-gray);">${esc(String(it.line_no))}</td>
+      <td>${esc(it.description || '—')}</td>
+      <td class="cx-mono" style="font-size:var(--text-xs);">${esc(it.nsn || '—')}</td>
+      <td style="text-align:center;">${esc(String(it.qty != null ? it.qty : ''))} ${esc(it.unit_of_issue || '')}</td>
+      <td>
+        <select class="cx-field" style="min-width:110px;padding:3px 6px;font-size:var(--text-xs);"
+                onchange="assignItemToBox('${esc(key)}', this.value)">
+          ${boxesFor(key)}
+        </select>
+      </td>
+    </tr>`;
+  }).join('');
+  return `<table class="cx-bom-table" style="margin:0;background:rgba(255,255,255,0.015);">
+    <thead><tr>
+      <th style="width:40px;">Line</th><th>Description</th><th>NSN</th><th>Qty</th><th>Assign to Box</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+window.toggleBomItems = function(bomId) {
+  const row = document.getElementById(`items-${bomId}`);
+  const btn = document.getElementById(`exp-${bomId}`);
+  if (!row) return;
+  const open = row.style.display !== 'none';
+  row.style.display = open ? 'none' : '';
+  if (open) delete STATE.openBoms[bomId]; else STATE.openBoms[bomId] = true;
+  if (btn) btn.innerHTML = open ? '&#9656;' : '&#9662;';
+};
+
+window.assignItemToBox = async function(itemKey, rawBoxNum) {
+  if (!STATE.connex) return;
+  const move = rawBoxNum
+    ? { item_key: itemKey, box_num: parseInt(rawBoxNum, 10) }
+    : null;
+  if (!move) return;  // "— Unassigned —" is a no-op for individual subitems
+  try {
+    const data = await api.post(`/api/connex/${STATE.connex.connex_id}/assign`, { moves: [move] });
+    STATE.connex = data.connex;
+    if (data.item_box_map) STATE.itemBoxMap = data.item_box_map;
+    refreshPackingView();
+  } catch (e) {
+    showError("packing-advance-error", "Item assign failed: " + e.message);
+  }
+};
+
+/* Box content/status helpers shared by the summary + status cards. */
+function boxBomNames(b) {
+  return (b.bom_ids || []).map(bid => {
+    const bom = STATE.boms.find(bm => bm.bom_id === bid);
+    return bom ? (bom.nomenclature || bom.filename || bid.slice(0,8)).slice(0,30) : bid.slice(0,8);
+  });
+}
+function boxBadge(b) {
+  const populated = (b.bom_ids || []).length > 0 || (b.individual_items || []).length > 0;
+  if (!populated)                  return ["cx-badge cx-badge--empty", "Empty"];
+  if (b.complete)                  return ["cx-badge cx-badge--ok",    "Ready"];
+  if (!b.sloc || !b.shrh_poc)      return ["cx-badge cx-badge--warn",  "Needs SLOC/POC"];
+  return ["cx-badge cx-badge--warn", "Incomplete"];
+}
+function boxContentLines(b) {
+  const indCount = (b.individual_items || []).length;
+  return [
+    ...boxBomNames(b).map(n => `<div style="font-size:var(--text-xs);color:var(--connex-light);padding:2px 0;border-bottom:1px solid var(--connex-stroke);">${esc(n)}</div>`),
+    ...(indCount > 0 ? [`<div style="font-size:var(--text-xs);color:var(--connex-gray);">+ ${indCount} individual item(s)</div>`] : []),
+  ].join('') || `<div class="cx-field-hint" style="font-size:var(--text-xs);">No items assigned</div>`;
+}
+
+/* Read-only box list for the Packing page right rail. */
+function renderBoxSummaryCards() {
   if (!STATE.connex) return '<span class="cx-field-hint">No connex loaded.</span>';
   return STATE.connex.boxes.map(b => {
-    const bomNames = (b.bom_ids || []).map(bid => {
-      const bom = STATE.boms.find(bm => bm.bom_id === bid);
-      return bom ? (bom.nomenclature || bom.filename || bid.slice(0,8)).slice(0,30) : bid.slice(0,8);
-    });
-    const indCount = (b.individual_items || []).length;
-    const populated = bomNames.length > 0 || indCount > 0;
-    let badgeCls, badgeText;
-    if (!populated)           { badgeCls = "cx-badge cx-badge--empty"; badgeText = "Empty"; }
-    else if (b.complete)      { badgeCls = "cx-badge cx-badge--ok";    badgeText = "Ready"; }
-    else if (!b.sloc || !b.shrh_poc) { badgeCls = "cx-badge cx-badge--warn"; badgeText = "Needs SLOC/SHRH"; }
-    else                      { badgeCls = "cx-badge cx-badge--warn";  badgeText = "Incomplete"; }
+    const [badgeCls, badgeText] = boxBadge(b);
+    const title = b.label ? esc(b.label) : `Box ${b.box_num}`;
+    return `<div class="cx-panel cx-panel--2" style="margin-bottom:var(--space-2);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-2);">
+        <strong style="color:var(--connex-light);">Box ${b.box_num}${b.label ? ` — ${title}` : ""}</strong>
+        <span class="${badgeCls}">${badgeText}</span>
+      </div>
+      <div>${boxContentLines(b)}</div>
+    </div>`;
+  }).join('');
+}
 
-    const contentLines = [
-      ...bomNames.map(n => `<div style="font-size:var(--text-xs);color:var(--connex-light);padding:2px 0;border-bottom:1px solid var(--connex-stroke);">${esc(n)}</div>`),
-      ...(indCount > 0 ? [`<div style="font-size:var(--text-xs);color:var(--connex-gray);">+ ${indCount} individual item(s)</div>`] : []),
-    ].join('') || `<div class="cx-field-hint" style="font-size:var(--text-xs);">No BOMs assigned</div>`;
-
+/* Editable box cards for the Box Status page: custom label + SLOC + SHRH POC. */
+function renderBoxStatusCards() {
+  if (!STATE.connex) return '<span class="cx-field-hint">No connex loaded.</span>';
+  return STATE.connex.boxes.map(b => {
+    const [badgeCls, badgeText] = boxBadge(b);
     return `<div class="cx-panel cx-panel--2" style="margin-bottom:var(--space-2);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-2);">
         <strong style="color:var(--connex-light);">Box ${b.box_num}</strong>
         <span class="${badgeCls}">${badgeText}</span>
       </div>
-      <div style="margin-bottom:var(--space-2);">${contentLines}</div>
+      <div style="margin-bottom:var(--space-2);">${boxContentLines(b)}</div>
+      <div class="cx-field-wrap" style="margin-bottom:var(--space-2);">
+        <label class="cx-label" style="font-size:10px;">Custom Label <span class="cx-field-hint">(e.g. "Launcher BII", "Commo Equipment")</span></label>
+        <input class="cx-field" style="font-size:var(--text-xs);padding:4px 6px;"
+               id="label-${b.box_num}" value="${esc(b.label || "")}" placeholder="Launcher BII"
+               onblur="saveBoxField(${b.box_num},'label',this.value)">
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-1);">
         <div>
           <label class="cx-label" style="font-size:10px;">SLOC ${buildHelpPopover("SLOC")}</label>
@@ -706,6 +821,7 @@ window.assignBomToBoxFromSelect = async function(bomId, rawBoxNum) {
         moves: [{ bom_id: bomId, exclude: true }],
       });
       STATE.connex = data.connex;
+      if (data.item_box_map) STATE.itemBoxMap = data.item_box_map;
       refreshPackingView();
     } catch (e) { console.error('Unassign failed:', e.message); }
     return;
@@ -721,6 +837,7 @@ async function assignBomToBox(bomId, boxNum) {
       moves: [{ bom_id: bomId, box_num: boxNum }],
     });
     STATE.connex = data.connex;
+    if (data.item_box_map) STATE.itemBoxMap = data.item_box_map;
     refreshPackingView();
   } catch (e) {
     showError("packing-advance-error", "Assign failed: " + e.message);
@@ -734,6 +851,7 @@ window.unassignBom = async function(bomId) {
       moves: [{ bom_id: bomId, exclude: true }],
     });
     STATE.connex = data.connex;
+    if (data.item_box_map) STATE.itemBoxMap = data.item_box_map;
     refreshPackingView();
   } catch (e) {
     console.error("Unassign failed:", e.message);
@@ -752,6 +870,8 @@ window.ingestBoms = async function(files) {
     STATE.boms   = data.boms || [];
     // Don't auto-assign — user assigns manually via the table
     STATE.boms = STATE.boms.map(b => ({ ...b, box_num: null }));
+    STATE.itemBoxMap = {};
+    STATE.openBoms   = {};
     if (status) status.textContent = `Extracted ${STATE.boms.length} BOM(s). Assign each to a box below.`;
     if (STATE.connex) {
       await api.post(`/api/connex/${STATE.connex.connex_id}/attach`, { ingest_job_id: data.job_id });
@@ -816,15 +936,17 @@ window.saveBoxField = async function(boxNum, field, value) {
   if (!box) return;
   box[field] = value;
   try {
+    const patchBox = { box_num: boxNum };
+    patchBox[field] = value;
     const updatedBoxes = STATE.connex.boxes.map(b =>
-      b.box_num === boxNum
-        ? { box_num: b.box_num, sloc: b.sloc, shrh_poc: b.shrh_poc }
-        : { box_num: b.box_num }
+      b.box_num === boxNum ? patchBox : { box_num: b.box_num }
     );
     const data = await api.put(`/api/connex/${STATE.connex.connex_id}`, { boxes: updatedBoxes });
     STATE.connex = data.connex;
-    const boxesEl = $("packing-boxes");
-    if (boxesEl) boxesEl.innerHTML = renderBoxCards();
+    refreshBoxStatusView();
+    // Keep the packing-page read-only summary in sync if it's mounted.
+    const summary = $("packing-boxes");
+    if (summary) summary.innerHTML = renderBoxSummaryCards();
     const prog = $("packing-progress");
     if (prog) prog.innerHTML = renderPackingProgress();
   } catch (e) {
@@ -844,9 +966,91 @@ function refreshPackingView() {
   const tbody = $("bom-table-body");
   if (tbody && STATE.boms.length) tbody.innerHTML = renderBomTableRows();
   const boxes = $("packing-boxes");
-  if (boxes) boxes.innerHTML = renderBoxCards();
+  if (boxes) boxes.innerHTML = renderBoxSummaryCards();
   const prog = $("packing-progress");
   if (prog) prog.innerHTML = renderPackingProgress();
+}
+
+/* Re-render the Box Status page in place (cards + audit + progress). */
+function refreshBoxStatusView() {
+  const cards = $("boxstatus-cards");
+  if (cards) cards.innerHTML = renderBoxStatusCards();
+  const audit = $("boxstatus-audit");
+  if (audit) audit.innerHTML = renderAuditFlagsHtml();
+  const prog = $("boxstatus-progress");
+  if (prog) prog.innerHTML = renderPackingProgress();
+}
+
+/* =========================================================
+ * Audit flags — computed once, shown on Box Status + Review.
+ * ========================================================= */
+function computeAuditFlags() {
+  const flags = [];
+  const boxes   = (STATE.connex && STATE.connex.boxes) || [];
+  const allBoms = STATE.boms || [];
+
+  const bomsNoLin = allBoms.filter(b => !b.lin);
+  if (bomsNoLin.length) flags.push({ type: "warn", msg: `${bomsNoLin.length} BOM(s) have no LIN — verify before sealing.` });
+
+  const bomsNoSn = allBoms.filter(b => !b.serial_number);
+  if (bomsNoSn.length) flags.push({ type: "warn", msg: `${bomsNoSn.length} BOM(s) have no Serial Number.` });
+
+  const unassigned = allBoms.filter(b => !bomAssignedBox(b));
+  if (unassigned.length) flags.push({ type: "error", msg: `${unassigned.length} BOM(s) are not assigned to any box.` });
+
+  const populated = boxes.filter(b => (b.bom_ids && b.bom_ids.length) || (b.individual_items && b.individual_items.length));
+  const emptyBoxes = boxes.filter(b => !(b.bom_ids && b.bom_ids.length) && !(b.individual_items && b.individual_items.length));
+  if (emptyBoxes.length) flags.push({ type: "error", msg: `Box(es) ${emptyBoxes.map(b => b.box_num).join(", ")} are empty — assign items or reduce box count.` });
+
+  populated.forEach(b => {
+    if (!b.sloc)     flags.push({ type: "warn", msg: `Box ${b.box_num}: missing SLOC.` });
+    if (!b.shrh_poc) flags.push({ type: "warn", msg: `Box ${b.box_num}: missing SHRH POC.` });
+  });
+
+  if (!flags.length) flags.push({ type: "ok", msg: "All checks passed — connex is ready to seal." });
+  return flags;
+}
+
+function renderAuditFlagsHtml() {
+  return computeAuditFlags().map(f => `<div class="cx-flag cx-flag--${f.type}">${esc(f.msg)}</div>`).join('');
+}
+
+/* =========================================================
+ * STEP — BOX_STATUS (label, organize, SLOC/POC, audit)
+ * ========================================================= */
+function renderBoxStatusStep(center, right) {
+  center.innerHTML = `
+    <div class="cx-panel" style="margin-bottom:var(--space-3);">
+      <h2 class="cx-panel__title">Box Status</h2>
+      <p class="cx-field-hint">Label and organize each box, apply its SLOC and SHRH POC, and review the audit before sealing.</p>
+    </div>
+
+    <div class="cx-panel" style="margin-bottom:var(--space-3);">
+      <h3 class="cx-panel__title cx-section-title">Audit</h3>
+      <div id="boxstatus-audit" style="margin-top:var(--space-2);">${renderAuditFlagsHtml()}</div>
+    </div>
+
+    <div class="cx-panel" style="margin-bottom:var(--space-3);">
+      <h3 class="cx-panel__title cx-section-title">Boxes</h3>
+      <div id="boxstatus-cards" style="margin-top:var(--space-2);">${renderBoxStatusCards()}</div>
+    </div>
+
+    <div style="display:flex;gap:var(--space-3);margin-top:var(--space-4);">
+      <button class="cx-btn cx-btn--ghost"   onclick="goTo('PACKING')">&larr; Packing</button>
+      <button class="cx-btn cx-btn--primary" onclick="goTo('SEAL_DATA')">Seal Data &rarr;</button>
+    </div>
+    <div id="boxstatus-advance-error" role="alert" class="cx-field-error-msg" style="display:none;margin-top:var(--space-2);"></div>`;
+
+  if (right) right.innerHTML = `
+    <div class="cx-panel" style="margin-bottom:var(--space-3);">
+      <h3 class="cx-panel__title">Progress</h3>
+      <div id="boxstatus-progress">${renderPackingProgress()}</div>
+    </div>
+    <div class="cx-panel">
+      <h3 class="cx-panel__title">What goes here</h3>
+      <p class="cx-field-hint">Give each box a custom label (e.g. "Launcher BII", "Commo Equipment"),
+        set where it's stored (SLOC) and who's accountable (SHRH POC). Resolve audit errors before sealing.</p>
+    </div>`;
 }
 
 /* =========================================================
@@ -968,37 +1172,9 @@ function renderSealErrors(errors) {
  * ========================================================= */
 function renderReviewSealStep(center, right) {
   const boxes     = (STATE.connex && STATE.connex.boxes) || [];
-  const populated = boxes.filter(b => (b.bom_ids && b.bom_ids.length) || (b.individual_items && b.individual_items.length));
+  const allBoms   = STATE.boms || [];
 
-  // Audit flags
-  const flags = [];
-  const allBoms = STATE.boms || [];
-
-  // Flag BOMs missing LIN
-  const bomsNoLin = allBoms.filter(b => !b.lin);
-  if (bomsNoLin.length) flags.push({ type: "warn", msg: `${bomsNoLin.length} BOM(s) have no LIN — verify before sealing.` });
-
-  // Flag BOMs missing serial number
-  const bomsNoSn = allBoms.filter(b => !b.serial_number);
-  if (bomsNoSn.length) flags.push({ type: "warn", msg: `${bomsNoSn.length} BOM(s) have no Serial Number.` });
-
-  // Flag unassigned BOMs
-  const unassigned = allBoms.filter(b => !bomAssignedBox(b));
-  if (unassigned.length) flags.push({ type: "error", msg: `${unassigned.length} BOM(s) are not assigned to any box.` });
-
-  // Flag empty boxes
-  const emptyBoxes = boxes.filter(b => !(b.bom_ids && b.bom_ids.length) && !(b.individual_items && b.individual_items.length));
-  if (emptyBoxes.length) flags.push({ type: "error", msg: `Box(es) ${emptyBoxes.map(b => b.box_num).join(", ")} are empty — assign items or reduce box count.` });
-
-  // Flag boxes missing SLOC or SHRH
-  populated.forEach(b => {
-    if (!b.sloc)     flags.push({ type: "warn", msg: `Box ${b.box_num}: missing SLOC.` });
-    if (!b.shrh_poc) flags.push({ type: "warn", msg: `Box ${b.box_num}: missing SHRH POC.` });
-  });
-
-  if (!flags.length) flags.push({ type: "ok", msg: "All checks passed — connex is ready to seal." });
-
-  const flagsHtml = flags.map(f => `<div class="cx-flag cx-flag--${f.type}">${esc(f.msg)}</div>`).join('');
+  const flagsHtml = renderAuditFlagsHtml();
 
   const checkRows = boxes.map(b => {
     const hasContent = (b.bom_ids && b.bom_ids.length) || (b.individual_items && b.individual_items.length);
@@ -1012,7 +1188,7 @@ function renderReviewSealStep(center, right) {
     else if (b.complete)  statusBadge = `<span class="cx-badge cx-badge--ok">Ready</span>`;
     else                  statusBadge = `<span class="cx-badge cx-badge--warn">Incomplete</span>`;
     return `<tr>
-      <td style="font-weight:600;">Box ${b.box_num}</td>
+      <td style="font-weight:600;">Box ${b.box_num}${b.label ? `<br><span class="cx-field-hint" style="font-weight:400;">${esc(b.label)}</span>` : ""}</td>
       <td class="cx-mono" style="font-size:var(--text-xs);">${esc(b.sloc || "—")}</td>
       <td style="font-size:var(--text-xs);">${esc(b.shrh_poc || "—")}</td>
       <td style="font-size:var(--text-xs);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(bomNomenclature)}">${esc(bomNomenclature)}</td>
@@ -1126,6 +1302,8 @@ window.startAnotherConnex = function() {
   STATE.connex       = null;
   STATE.job_id       = null;
   STATE.boms         = [];
+  STATE.itemBoxMap   = {};
+  STATE.openBoms     = {};
   goTo("CONNEX_SETUP");
 };
 
@@ -1264,20 +1442,25 @@ const TUTORIAL_SLIDES = [
   {
     badge: "Step 3",
     heading: "Packing",
-    body: "Ingest your BOM PDFs, then use the assignment table to pick which box each BOM goes to. Give each box its SLOC and SHRH POC in the right rail. Add loose individual items directly to any box.",
+    body: "Ingest your BOM PDFs, then use the assignment table to pick which box each end item goes to. Click the ▸ on any end item to drop down its subitems and assign them to boxes individually. Add loose individual items directly to any box.",
   },
   {
     badge: "Step 4",
+    heading: "Box Status",
+    body: "Label and organize each box with a custom name (e.g. “Launcher BII”, “Commo Equipment”), apply its SLOC and SHRH POC, and review the audit — CRATE flags missing LINs, serial numbers, empty boxes, and missing SLOC/POC here.",
+  },
+  {
+    badge: "Step 5",
     heading: "Seal Data",
     body: "Enter your SUN #, CONNEX #, and SEAL # (leave blank to print a placeholder), plus who packed and who signs. Tap the ? on any field for help — SEAL # and CONNEX # show a photo of where to read the number.",
   },
   {
-    badge: "Step 5",
+    badge: "Step 6",
     heading: "Review & Seal",
-    body: "Run an audit on your connex — CRATE flags missing LINs, serial numbers, empty boxes, and missing SLOC/SHRH POC. Resolve all errors, then apply your stamp and download your 1750s.",
+    body: "Do a final review of the box manifest, then apply your stamp and download your 1750s.",
   },
   {
-    badge: "Step 6",
+    badge: "Step 7",
     heading: "Next / SITREP",
     body: "Pack another connex under the same profile, or finish and generate the commander’s SITREP across everything you packed.",
   },
