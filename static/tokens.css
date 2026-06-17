@@ -1,0 +1,77 @@
+/* tokens.css — CONTRACT E (do NOT rename these properties; 3D reads them via getComputedStyle)
+ * Owned by: UI Design agent
+ * Consumers: style.css, connex3d.js (3D), Frontend, QA
+ * Last updated: 2026-06-17
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* ── core palette ─────────────────────────────────────── */
+  --connex-gold:  #D4BF91;   /* primary accent, complete state, key CTAs */
+  --connex-gray:  #B2B4B3;   /* container body, neutral text             */
+  --connex-black: #0E0F11;   /* command-center base background           */
+
+  /* ── surfaces (glassmorphism) ─────────────────────────── */
+  --connex-panel:   rgba(20, 22, 25, 0.72);   /* glass card               */
+  --connex-panel-2: rgba(32, 35, 40, 0.85);   /* raised glass             */
+  --connex-stroke:  rgba(212, 191, 145, 0.18);/* gold hairline border      */
+  --connex-stroke-2: rgba(178, 180, 179, 0.12);/* gray subtle separator    */
+
+  /* ── semantic state (shared with 3D — names are contract) */
+  --connex-ok:     #6FCF97;  /* box complete / all required fields set   */
+  --connex-warn:   #E0B341;  /* needs attention (missing SLOC/SHRH)      */
+  --connex-empty:  #5A5E63;  /* empty / inactive box                     */
+  --connex-danger: #E5675A;  /* validation error                         */
+
+  /* ── box-state selection ring ─────────────────────────── */
+  /* selected ring uses --connex-gold (Contract E §7)        */
+
+  /* ── typography ───────────────────────────────────────── */
+  --font-ui:   'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace; /* IDs, NSN/LIN, codes */
+
+  /* ── type scale ───────────────────────────────────────── */
+  --text-xs:   12px;
+  --text-sm:   14px;
+  --text-base: 16px;
+  --text-md:   20px;
+  --text-lg:   28px;
+  --text-hero: 40px;
+
+  /* ── spacing ──────────────────────────────────────────── */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* ── radius ───────────────────────────────────────────── */
+  --radius-sm:  6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  /* ── elevation / shadow ───────────────────────────────── */
+  --shadow-sm:  0 2px 8px rgba(0, 0, 0, 0.45);
+  --shadow-md:  0 4px 20px rgba(0, 0, 0, 0.6);
+  --shadow-gold: 0 0 0 1px var(--connex-stroke), 0 4px 24px rgba(212, 191, 145, 0.08);
+
+  /* ── z-index scale ─────────────────────────────────────  */
+  --z-base:    10;
+  --z-overlay: 20;
+  --z-modal:   30;
+  --z-popover: 50;
+
+  /* ── transitions ──────────────────────────────────────── */
+  --transition-fast:   150ms ease;
+  --transition-base:   250ms ease;
+  --transition-slow:   350ms ease;
+
+  /* ── glassmorphism recipe (use on .cx-panel, .cx-panel-2) */
+  /* background: var(--connex-panel);                         */
+  /* backdrop-filter: blur(14px);                             */
+  /* border: 1px solid var(--connex-stroke);                  */
+  /* border-radius: var(--radius-lg);                         */
+}
