@@ -2,6 +2,10 @@
  * Owned by: UI Design agent
  * Consumers: style.css, connex3d.js (3D), Frontend, QA
  * Last updated: 2026-06-17
+ *
+ * NOTE: panels use solid RGBA (no backdrop-filter/glassmorphism).
+ * Reason: backdrop-filter is unreliable on government/enterprise networks,
+ * older browsers, and breaks WebGL compositing for the 3D connex canvas.
  */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
@@ -12,9 +16,9 @@
   --connex-gray:  #B2B4B3;   /* container body, neutral text             */
   --connex-black: #0E0F11;   /* command-center base background           */
 
-  /* ── surfaces (glassmorphism) ─────────────────────────── */
-  --connex-panel:   rgba(20, 22, 25, 0.72);   /* glass card               */
-  --connex-panel-2: rgba(32, 35, 40, 0.85);   /* raised glass             */
+  /* ── surfaces (solid RGBA — no backdrop-filter) ──────── */
+  --connex-panel:   rgb(20, 22, 25);          /* dark card surface         */
+  --connex-panel-2: rgb(32, 35, 40);          /* raised surface            */
   --connex-stroke:  rgba(212, 191, 145, 0.18);/* gold hairline border      */
   --connex-stroke-2: rgba(178, 180, 179, 0.12);/* gray subtle separator    */
 
@@ -69,9 +73,4 @@
   --transition-base:   250ms ease;
   --transition-slow:   350ms ease;
 
-  /* ── glassmorphism recipe (use on .cx-panel, .cx-panel-2) */
-  /* background: var(--connex-panel);                         */
-  /* backdrop-filter: blur(14px);                             */
-  /* border: 1px solid var(--connex-stroke);                  */
-  /* border-radius: var(--radius-lg);                         */
 }

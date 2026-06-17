@@ -4,6 +4,10 @@
  * Consumers: Frontend (HTML), _styleguide.html (QA)
  * Last updated: 2026-06-17
  *
+ * NOTE: no backdrop-filter anywhere in this file.
+ * Solid RGBA surfaces only — reliable on government/enterprise networks,
+ * older browsers, and safe with the WebGL 3D canvas.
+ *
  * Component index:
  *   .cx-panel          glass card container
  *   .cx-panel-2        raised glass (nested surfaces)
@@ -59,8 +63,6 @@ body {
 
 .cx-panel {
   background: var(--connex-panel);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--connex-stroke);
   border-radius: var(--radius-lg);
   padding: var(--space-6);
@@ -69,8 +71,6 @@ body {
 
 .cx-panel--2 {
   background: var(--connex-panel-2);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--connex-stroke);
   border-radius: var(--radius-lg);
   padding: var(--space-4);
@@ -576,8 +576,6 @@ textarea.cx-field {
   width: 240px;
   padding: var(--space-3);
   background: var(--connex-panel-2);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--connex-stroke);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-md);
@@ -722,8 +720,6 @@ textarea.cx-field {
   gap: var(--space-2);
   padding: var(--space-3);
   background: var(--connex-panel);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--connex-stroke-2);
   border-radius: var(--radius-md);
   cursor: grab;
