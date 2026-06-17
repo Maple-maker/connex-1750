@@ -2,8 +2,7 @@
 
 **Date:** 2026-06-17
 **Branch:** feat/connex-3d
-**Agent:** Frontend (Wave 2)
-**Commit:** 7900e2b
+**Agent:** Frontend (Wave 2 → Wave 3 redesign)
 
 ---
 
@@ -11,8 +10,8 @@
 
 | File | Status | Notes |
 |------|--------|-------|
-| `templates/index.html` | REPLACED | 3-column .cx-layout shell; three.js importmap; legacy 2D flow preserved in `<details>` |
-| `static/app.js` | REPLACED | Full 8-step ES-module state machine; all Contract A calls; Contract D wiring |
+| `templates/index.html` | REPLACED | 3-column .cx-layout shell; three.js importmap; legacy 2D flow preserved in `<details>`; split-screen CSS; no persistent 3D canvas at load |
+| `static/app.js` | REPLACED | 6-step ES-module state machine; 2D split-screen PACKING; 3D ONLY in REVIEW_SEAL; all Contract A calls |
 | `static/glossary.js` | NEW | Canonical GLOSSARY (13 terms) + `buildHelpPopover()` helper |
 | `docs/handoff/frontend.md` | NEW | This file |
 
@@ -21,59 +20,96 @@
 
 ---
 
-## State Machine Map
+## State Machine Map — 6 Steps
 
 ```
 STATE.step ──────────────────────── Guard (cannot advance until…)
-┌──────────────────────────────────────────────────────────────────┐
-│ PROFILE         renderProfileStep()     no guard (entry point)  │
-│   ↓ goTo()      POST /api/profiles                              │
-│ CONNEX_SETUP    renderConnexSetupStep() STATE.profile set        │
-│   ↓             POST /api/connex                                │
-│ PACKING         renderPackingStep()     STATE.connex set         │
-│   ↓             POST /ingest (attach)                           │
-│                 POST /api/connex/<id>/assign                    │
-│                 PUT  /api/connex/<id>  (SLOC/SHRH per box)     │
-│ SEAL_DATA       renderSealDataStep()   allBoxesComplete()        │
-│   ↓             PUT  /api/connex/<id>  (SUN/CONNEX/signed_by)  │
-│                 POST /api/connex/<id>/seal → Contract B errors  │
-│ INDIVIDUAL      renderIndividualStep() seal returned ok:true     │
-│   ↓             PUT  /api/connex/<id>  (individual_items)      │
-│ CLOSE_STAMP     renderCloseStampStep() connex.status==="sealed"  │
-│   ↓             POST /api/connex/<id>/generate → ZIP download  │
-│ NEXT?           renderNextStep()       connex sealed             │
-│   ↓ "another"   → reset connex/boms, loop to CONNEX_SETUP      │
-│   ↓ "finish"    → goTo("SITREP")                               │
-│ SITREP          renderSitrepStep()     sessionConnexIds.length>0 │
-│                 POST /api/sitrep                                 │
-│                 POST /api/sitrep/pdf → PDF download             │
-└──────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│ PROFILE         renderProfileStep()       no guard (entry point)    │
+│   ↓ goTo()      GET /static/formations/manifest.json               │
+│                 GET /api/profiles  (resume card)                    │
+│                 POST /api/profiles                                  │
+│ CONNEX_SETUP    renderConnexSetupStep()   STATE.profile set          │
+│   ↓             POST /api/connex                                    │
+│ PACKING         renderPackingStep()       STATE.connex set           │
+│   ↓             POST /ingest (attach)                               │
+│   [2D split]    POST /api/connex/<id>/attach                        │
+│                 POST /api/connex/<id>/assign   (BOM → box)         │
+│                 PUT  /api/connex/<id>          (SLOC/SHRH per box) │
+│ SEAL_DATA       renderSealDataStep()      allBoxesComplete()         │
+│   ↓             PUT  /api/connex/<id>  (SUN/CONNEX/signed_by)     │
+│ REVIEW_SEAL     renderReviewSealStep()    STATE.connex set           │
+│   [3D mount]    POST /api/connex/<id>/seal → Contract B errors     │
+│                 POST /api/connex/<id>/generate → ZIP download       │
+│   ↓ on success  → auto-advance after 1.2 s                        │
+│ NEXT_SITREP     renderNextSitrepStep()    connex.status==="sealed"   │
+│   ↓ "another"   → reset connex/boms, loop to CONNEX_SETUP         │
+│   ↓ "sitrep"    POST /api/sitrep                                    │
+│                 POST /api/sitrep/pdf → PDF download                 │
+└──────────────────────────────────────────────────────────────────────┘
 ```
+
+**Key design decisions from Wave 3 redesign:**
+- INDIVIDUAL items are added inside the PACKING step (left pool, "Add Individual Item" form). No separate INDIVIDUAL step.
+- 3D canvas is NOT present at page load. It is created dynamically inside `renderReviewSealStep()` and disposed by `goTo()` on step exit.
+- The persistent 3D/Table view toggle from the old design is gone — no such element exists in the HTML.
+- PACKING is a pure 2D split-screen (pool ↔ boxes). Zero three.js in steps 1–4.
 
 **Back-navigation:** clicking a completed stepper dot (index ≤ current) always succeeds with no guard check. Forward-jump of >1 step via stepper is blocked.
 
 ---
 
-## AI Helper Hook Location
+## PACKING Step — 2D Split-Screen Detail
 
-File: `static/app.js`, function `renderIndividualStep()`, right-rail panel.
-
-```js
-// ============================================================
-// AI HELPER HOOK — DEFERRED (fast-follow / owl-alpha)
-// When the AI assistant agent is ready, wire it here:
-//   - Attach to the input fields below (description, NSN, LIN)
-//   - Call POST /api/ai/suggest-item with {description, box_num, connex_id}
-//   - Populate suggested NSN/LIN into the form fields
-// Contract: /api/ai/suggest-item is a stub defined in ai_assist.py.
-// Do NOT connect this in the MVP critical path.
-// ============================================================
-<div id="ai-helper-hook" style="display:none;" data-ai-endpoint="/api/ai/suggest-item">
-  <!-- AI helper mounts here in fast-follow wave -->
-</div>
+HTML structure (rendered by `renderPackingStep()`):
+```
+#packing-split   { grid-template-columns: 1fr 1fr }
+├── left column
+│   ├── #bom-drop-zone          Drop PDF → ingestBoms() → POST /ingest
+│   ├── #pool-cards             Rendered by renderPoolCards()
+│   │   └── .cx-bom-card[draggable]   Pool = boms not in any box.bom_ids
+│   └── #individual-form        Hidden until "+ Add Individual Item" click
+└── right column
+    └── #box-cards              Rendered by renderBoxCards()
+        └── .cx-panel per box
+            ├── BOM chips + × unassign buttons
+            ├── individual item chips + × remove buttons
+            ├── #sloc-N input   → onchange: saveBoxField(N,'sloc',val)
+            └── #shrh-N input   → onchange: saveBoxField(N,'shrh_poc',val)
 ```
 
-The `#ai-helper-hook` div is in the right rail of step 5 (INDIVIDUAL). The `data-ai-endpoint` attribute names the route. Wiring: listen for `input` events on `idesc-${boxNum}-${idx}` fields, debounce 600ms, POST to `/api/ai/suggest-item`, populate `insn-` and `ilin-` inputs with the response.
+**Assignment paths:**
+1. **Drag-drop:** `ondragstart` → `STATE._dragBomId`; `ondrop` → `assignBomToBox(bomId, boxNum)` → `POST /assign {moves:[...]}`
+2. **Click-select:** click pool card → `STATE._clickSelectBomId = bomId` (gold outline); click box card → `assignBomToBox(bomId, boxNum)`
+3. **Unassign:** click `×` chip → `POST /assign {moves:[{bom_id, exclude:true}]}`
+
+A box is `complete` when: populated AND has SLOC AND has SHRH POC. Computed server-side on every write; `box.complete` is read directly from the response.
+
+---
+
+## REVIEW_SEAL Step — 3D Integration
+
+3D canvas is mounted in `initReviewScene()` (async, non-blocking):
+```js
+const mod    = await import("/static/connex3d.js");  // dynamic import — throws → fallback
+const canvas = document.createElement("canvas");
+mount.appendChild(canvas);
+STATE.scene  = mod.createConnexScene(canvas, {});
+await STATE.scene.openConnex(false);     // read-only, no drag
+STATE.scene.setBoxCount(boxes.length);
+boxes.forEach(b => STATE.scene.setBoxState(b.box_num, {...}));
+STATE.scene.onBoxSelect(boxNum => showReviewBoxDetail(boxNum));
+```
+
+On WebGL failure: `try/catch` suppresses; `#cx-3d-loading` shows "3D view unavailable — using checklist above." The box checklist table is always rendered regardless of 3D availability.
+
+On stamp + seal (in `applySealAndDownload()`):
+```js
+STATE.scene.applyStamp(profile.stamp_text);
+await STATE.scene.closeConnex(true);
+```
+
+On step exit: `STATE.scene.dispose()` is called by `goTo()` when leaving REVIEW_SEAL.
 
 ---
 
@@ -83,74 +119,72 @@ The `#ai-helper-hook` div is in the right rail of step 5 (INDIVIDUAL). The `data
 |------|--------------|
 | PROFILE | `GET /api/profiles`, `POST /api/profiles`, `GET /api/profiles/<id>` |
 | CONNEX_SETUP | `POST /api/connex` |
-| PACKING | `POST /ingest` (existing), `POST /api/connex/<id>/attach`, `POST /api/connex/<id>/assign`, `PUT /api/connex/<id>` |
-| SEAL_DATA | `PUT /api/connex/<id>` (draft save), `POST /api/connex/<id>/seal` |
-| INDIVIDUAL | `PUT /api/connex/<id>` (per-box individual_items) |
-| CLOSE_STAMP | `POST /api/connex/<id>/generate` (binary ZIP) |
-| NEXT? | — (state reset only) |
-| SITREP | `POST /api/sitrep`, `POST /api/sitrep/pdf` |
-
----
-
-## Drag-Drop → /assign Mapping
-
-1. BOM card sets `draggable="true"` and fires `handleBomDragStart(event, bomId)` on `dragstart`, which writes `bomId` into `event.dataTransfer` under key `application/bom-id`.
-2. `STATE._pendingDragBomId` is set on `dragenter` on the canvas.
-3. The 3D module raycasts (Contract D) and fires `onBoxDrop(boxNum, payload)`. Frontend's `handleBoxDrop(boxNum)` reads `STATE._pendingDragBomId` and POSTs to `POST /api/connex/<id>/assign`.
-4. On success, `syncBoxStateTo3D()` calls `scene.setBoxState(boxNum, {complete, bomCount, hasItems})` to recolor the box.
-
-The table-view fallback (no WebGL) uses the click-to-assign panel (`openBomAssignPanel`) instead of drag-drop. Both paths call the same `/assign` endpoint.
-
----
-
-## 3D Module Integration
-
-Wiring is against Contract D (`/static/connex3d.js`). The `initScene()` function does a dynamic `import("/static/connex3d.js")` — if it throws (module absent, WebGL unavailable, or any error), the canvas is hidden and all UI falls back to the list-table view. No hard crash.
-
-Callbacks wired:
-- `scene.onBoxDrop(cb)` → `handleBoxDrop(boxNum, payload)`
-- `scene.onBoxSelect(cb)` → `openBoxDetailPanel(boxNum)`
-
-3D calls made per step:
-- CONNEX_SETUP: `scene.openConnex(true)`, `scene.setBoxCount(n)`
-- PACKING: `scene.highlightBox(boxNum, on)`, `scene.setBoxState(boxNum, {...})`
-- SEAL_DATA: `scene.closeConnex(true)` (called on advance from PACKING)
-- CLOSE_STAMP: `scene.applyStamp(profile.stamp_text)`
-- NEXT? → new connex: `scene.dispose()` + `initScene()` re-mounts
-
-**Integration gap:** `connex3d.js` was not delivered at time of this commit. Frontend is wired against Contract D and the fallback is verified. QA should verify 3D integration once `connex3d.js` is committed.
+| PACKING | `POST /ingest`, `POST /api/connex/<id>/attach`, `POST /api/connex/<id>/assign`, `PUT /api/connex/<id>` |
+| SEAL_DATA | `PUT /api/connex/<id>` |
+| REVIEW_SEAL | `POST /api/connex/<id>/seal`, `POST /api/connex/<id>/generate` |
+| NEXT_SITREP | `POST /api/sitrep`, `POST /api/sitrep/pdf` |
 
 ---
 
 ## Glossary Coverage
 
-All required jargon terms have `?` popovers via `buildHelpPopover()` from `glossary.js`:
+All jargon terms have `?` popovers via `buildHelpPopover()` from `glossary.js`:
 
 | Term | Where |
 |------|-------|
-| SLOC | Box detail panel (PACKING step) — labeled "Required" |
-| SHRH POC | Box detail panel (PACKING step) — labeled "Required" |
+| SLOC | Box cards in PACKING step — labeled "req" |
+| SHRH POC | Box cards in PACKING step — labeled "req" |
 | SUN # | SEAL_DATA step |
 | CONNEX # | CONNEX_SETUP + SEAL_DATA |
 | SEAL # | SEAL_DATA step |
-| NSN | INDIVIDUAL step (per-item form) |
-| LIN | INDIVIDUAL step (per-item form) |
+| NSN | PACKING step individual item form |
+| LIN | PACKING step individual item form |
 | CONNEX | CONNEX_SETUP step title |
 
 ---
 
-## Seal Error Inline Display
+## Seal Error Display
 
-`renderSealErrors(errors)` in `seal-data` step:
-- Renders the `errors` array from `POST /api/connex/<id>/seal` response (`{ok:false, errors:[...]}`)  into `.cx-error-list` block.
-- Maps `NO_SIGNER` and `SIGNER_EQ_PACKER` error codes to add `.cx-field--error` class to `#sd_signed_by` input.
-- `MISSING_SLOC` / `MISSING_SHRH` / `EMPTY_BOX` are shown in the error list — the per-box context is in the PACKING step's box detail panel.
+`renderSealErrors(errors)` in REVIEW_SEAL step:
+- Renders the `errors` array from `POST /api/connex/<id>/seal` response (`{ok:false, errors:[...]}`) into `#seal-errors`.
+- Contract B error codes: `EMPTY_BOX`, `MISSING_SLOC`, `MISSING_SHRH`, `NO_SIGNER`, `SIGNER_EQ_PACKER`.
+- Blank SUN/CONNEX#/SEAL# are allowed at seal (server returns ok=true).
+
+---
+
+## AI Helper Hook Location
+
+Deferred hook lives in PACKING step's individual-item form. When the AI assistant agent is ready:
+- Listen on `#indv_desc` input, debounce 600ms
+- POST `/api/ai/suggest-item` with `{description, connex_id}`
+- Populate `#indv_nsn` and `#indv_lin` from response
+
+---
+
+## End-to-End Verification Results (Wave 3)
+
+Verified live against real BOM PDFs in `../arms room BOMs/`:
+
+```
+[1] Profile: POST /api/profiles → 200, brigade_image wired
+[2] Connex:  POST /api/connex   → status=building, 3 boxes
+[3] Ingest:  POST /ingest (3 M249/M39331 PDFs) → 3 boms extracted
+[4] Attach:  POST /api/connex/<id>/attach → 200
+[5] Assign:  POST /api/connex/<id>/assign (3 moves) → boxes populated
+[6] SLOC/SHRH: PUT /api/connex/<id> → all 3 boxes complete=True
+[7] Seal:    POST /api/connex/<id>/seal → ok=True, status=sealed
+[8] ZIP:     POST /api/connex/<id>/generate → 32 KB ZIP
+             Master_1750.pdf: 59 693 B  PDF=True
+             Box_001.pdf:     60 318 B  PDF=True
+             Box_002.pdf:     60 694 B  PDF=True
+             Box_003.pdf:     60 692 B  PDF=True
+```
 
 ---
 
 ## Legacy 2D Flow Preservation
 
-All original functions renamed with `legacy` prefix (`legacyDoIngest`, `legacyAutoAssign`, etc.) and moved to a non-module `<script>` tag scoped inside `#legacy-wrap`. All routes (`/ingest`, `/assign`, `/regroup`, `/generate-master`, `/generate-individuals`, `/audit`) are unchanged. The legacy section is collapsed inside a `<details>` element — not removed. No regression introduced.
+All original functions are preserved in a non-module `<script>` tag inside `#legacy-wrap → <details>`. All routes (`/ingest`, `/assign`, `/regroup`, `/generate-master`, `/generate-individuals`, `/audit`) unchanged. No regression.
 
 ---
 
@@ -158,42 +192,48 @@ All original functions renamed with `legacy` prefix (`legacyDoIngest`, `legacyAu
 
 | Gap | Owner | Notes |
 |-----|-------|-------|
-| `connex3d.js` not yet committed | 3D agent | Frontend wired against Contract D; WebGL fallback active |
-| `scene.onBoxDrop` payload format | 3D agent | Frontend reads `STATE._pendingDragBomId` on `dragenter`; the exact payload from the 3D callback is not yet confirmed — may need one-line fix once 3D ships |
-| AI helper | AI Assistant (fast-follow) | Hook at `#ai-helper-hook` in INDIVIDUAL step right rail |
-| SITREP PDF | DD1750 agent | `/api/sitrep/pdf` returns JSON bytes as placeholder; will auto-improve when `sitrep_render.render_sitrep_pdf` is implemented |
+| `connex3d.js` contract | 3D agent | Frontend calls `createConnexScene`, `openConnex`, `setBoxCount`, `setBoxState`, `onBoxSelect`, `applyStamp`, `closeConnex`, `dispose`, `resize` — all via dynamic import with try/catch fallback |
+| AI helper | AI Assistant (fast-follow) | Hook in PACKING step individual-item form |
+| SITREP PDF richness | DD1750 agent | `/api/sitrep/pdf` returns JSON bytes as placeholder; auto-improves when `sitrep_render` ships |
 
 ---
 
 ## How to Verify
 
 ```bash
-# Start the server
+# Start server
 cd master-1750-tool && python3 app.py
 
-# Confirm new shell loads (not legacy)
-curl -s http://localhost:8000/ | grep "CONNEX 1750"
-# -> <title>CONNEX 1750 — Packing List Generator</title>
-
-# Confirm static modules load (ES module imports)
-curl -s http://localhost:8000/static/app.js | head -3
-curl -s http://localhost:8000/static/glossary.js | head -3
-
-# Confirm API routes (note: macOS system proxy on :8000 may intercept --
-# test from Python if curl shows 404)
+# Server up
 python3 -c "import requests; print(requests.get('http://localhost:8000/api/profiles').status_code)"
 # -> 200
 
-# Run the full legacy + new test suite (no regressions)
-python3 -m pytest test_packing.py test_grouping.py test_reconcile.py test_zero_on_hand.py \
-                  test_profiles.py test_connex.py test_sitrep.py -v
+# Headless flow test
+python3 -c "
+import requests, os
+BASE='http://localhost:8000'
+BOM_DIR='../arms room BOMs'
+# Profile
+p = requests.post(f'{BASE}/api/profiles', json={
+  'brigade':'108th ADA','battalion':'2-55 ADA','battery':'B',
+  'stamp_text':'2-55 ADA','brigade_image':'108th_Air_Defense_Artillery_Brigade.svg',
+  'default_packed_by':'1LT RABATIN','signed_by':'CPT HOLLAND'}).json()['profile']
+# Connex
+c = requests.post(f'{BASE}/api/connex', json={'profile_id':p['profile_id'],'box_count':2}).json()['connex']
+# Ingest
+files=[('boms',(f, open(os.path.join(BOM_DIR, f),'rb'),'application/pdf'))
+       for f in ['M39331 MACHINE GUN CALIBER A001382.pdf']]
+job = requests.post(f'{BASE}/ingest', files=files).json()
+requests.post(f'{BASE}/api/connex/{c[\"connex_id\"]}/attach', json={'ingest_job_id':job['job_id']})
+requests.post(f'{BASE}/api/connex/{c[\"connex_id\"]}/assign', json={'moves':[{'bom_id':job['boms'][0]['bom_id'],'box_num':1}]})
+requests.put(f'{BASE}/api/connex/{c[\"connex_id\"]}', json={'boxes':[{'box_num':1,'sloc':'BLDG-100','shrh_poc':'CPT JONES'}],'packed_by':'1LT RABATIN','signed_by':'CPT JONES'})
+seal=requests.post(f'{BASE}/api/connex/{c[\"connex_id\"]}/seal').json()
+assert seal['ok'], seal
+r=requests.post(f'{BASE}/api/connex/{c[\"connex_id\"]}/generate')
+assert r.content[:4]==b'PK', 'Not a ZIP'
+print('PASS')
+"
 
-# Open in browser, step through workflow:
-# 1. Fill profile form → Save Profile → auto-advances to Connex Setup
-# 2. Set box count → Open Connex → advances to Packing
-# 3. Drop BOM PDFs → assign to boxes → fill SLOC+SHRH → advance
-# 4. Fill SUN/signer → Seal Connex → Contract B errors appear inline if invalid
-# 5. Add optional individual items
-# 6. Download DD1750 ZIP
-# 7. Choose another connex or SITREP
+# Open browser
+open http://localhost:8000/
 ```

@@ -29,25 +29,10 @@
 }
 </script>
 
-<!-- Shell styles — scoped to the new cx-layout only.
-     Legacy packing-list sections keep their own styles in the original block
-     (collapsed below). This block only adds what the 3-column shell needs. -->
+<!-- Shell styles — scoped to the new cx-layout shell.
+     Legacy packing-list sections keep their own styles in the legacy block below.
+     3D canvas is mounted dynamically by REVIEW_SEAL step only — not present at load. -->
 <style>
-  /* Canvas fills the .cx-center column */
-  #cx-3d-canvas {
-    width: 100%;
-    height: 100%;
-    min-height: 420px;
-    display: block;
-    border-radius: var(--radius-md);
-  }
-
-  /* List-view fallback — shown when WebGL is absent */
-  #cx-list-view {
-    display: none;
-    padding: var(--space-4);
-  }
-
   /* Step error banner */
   #step-error {
     display: none;
@@ -57,7 +42,7 @@
     border-radius: var(--radius-sm);
     color: var(--connex-danger);
     font-size: var(--text-sm);
-    margin: var(--space-2) 0;
+    margin: 0 0 var(--space-3);
   }
 
   /* Popover open state — toggled by toggleHelp() in app.js */
@@ -65,15 +50,45 @@
     display: block !important;
   }
 
-  /* ── Rail scroll ───────────────────────────────────── */
+  /* Rail scroll */
   .cx-rail-left,
   .cx-rail-right {
     overflow-y: auto;
     max-height: 100vh;
   }
 
-  /* ── Legacy tool section hidden by default in the new UI.
-        Exposed in a <details> collapse at the bottom. ── */
+  /* 3D canvas — injected into #cx-3d-mount by REVIEW_SEAL step */
+  #cx-3d-mount canvas {
+    width: 100%;
+    min-height: 380px;
+    display: block;
+    border-radius: var(--radius-md);
+  }
+
+  /* Packing split-screen — two equal panes */
+  #packing-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-4);
+    align-items: start;
+  }
+  @media (max-width: 900px) {
+    #packing-split { grid-template-columns: 1fr; }
+  }
+
+  /* BOM pool card selected state (click-to-assign) */
+  .cx-bom-card--selected {
+    outline: 2px solid var(--connex-gold);
+    outline-offset: 2px;
+  }
+
+  /* Box drop-target highlight during drag */
+  .box-card--drag-over {
+    outline: 2px solid var(--connex-ok);
+    background: rgba(111,207,151,0.08);
+  }
+
+  /* Legacy wrap */
   #legacy-wrap { padding-top: var(--space-4); }
 </style>
 </head>
@@ -104,30 +119,16 @@
     </ol>
   </aside>
 
-  <!-- ── CENTER — 3D canvas + view toggle + step panel ── -->
+  <!-- ── CENTER — step content (3D canvas injected dynamically only in REVIEW_SEAL) ── -->
   <div class="cx-center">
 
     <!-- Global step-transition error (guard failures) -->
     <div id="step-error" role="alert"></div>
 
-    <!-- View toggle strip — 3D / Table -->
-    <div class="cx-view-toggle" id="cx-view-toggle" style="margin-bottom: var(--space-3);">
-      <button class="cx-view-toggle__btn cx-view-toggle__btn--active" id="btn-view-3d"
-              onclick="setView('3d')">3D View</button>
-      <button class="cx-view-toggle__btn" id="btn-view-table"
-              onclick="setView('table')">Table View</button>
-    </div>
-
-    <!-- three.js canvas (hidden when WebGL absent) -->
-    <canvas id="cx-3d-canvas"></canvas>
-
-    <!-- List / table fallback (shown when WebGL absent) -->
-    <div id="cx-list-view">
-      <p class="cx-field-hint">3D view unavailable — using table view.</p>
-    </div>
-
-    <!-- Step-specific content panel (app.js renders each step here) -->
-    <div id="cx-step-content" style="margin-top: var(--space-4);">
+    <!-- Step-specific content panel — app.js renders each step here.
+         The 3D canvas is NOT present at load; REVIEW_SEAL injects a
+         #cx-3d-mount div + canvas dynamically, then disposes it on exit. -->
+    <div id="cx-step-content">
       <!-- renderStepPanel() targets this element -->
     </div>
 
