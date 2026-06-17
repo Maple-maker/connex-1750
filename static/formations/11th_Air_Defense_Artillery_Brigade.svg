@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+	xmlns:svg="http://www.w3.org/2000/svg"
+	xmlns="http://www.w3.org/2000/svg"
+	version="1.1"
+	width="400" height="600">
+	<title>11th ADA Brigade Shoulder Sleeve Insignia</title>
+	<path d="M 0,568.625 C 63.006903,588.97935 130.21815,600 200,600 269.78185,600 336.9931,588.97935 400,568.625 L 400,31.375 C 336.9931,11.020649 269.78185,0 200,0 130.21815,0 63.006903,11.020649 0,31.375 z"
+		style="fill:#e01f29;stroke:none" />
+	<path d="M 25,300 V 550.15625 A 625,625 0 0 0 375,550.15625 V 300 H 25 z"
+		style="fill:#fdcd30;stroke:#711014;stroke-opacity:0.5" />
+	<path d="M 25,49.84375 V 300 H 375 V 49.84375 A 625,625 0 0 0 25,49.84375 z"
+		style="fill:#e01f29;stroke:#b81017" />
+	<path d="M 200,364.62256 365,120 290,120 222.41871,237.05423 246,45 154,45 177.58129,237.05423 110,120 35,120 z"
+		style="fill:#fdcd30;stroke:#fdcd30;stroke-width:1;stroke-linejoin:miter;stroke-miterlimit:6;stroke-opacity:0.5" />
+	<path d="M 200,235.37744 365,480 290,480 222.41871,362.94577 246,555 154,555 177.58129,362.94577 110,480 35,480 z"
+		style="fill:#e01f29;stroke:#e01f29;stroke-width:1;stroke-linejoin:miter;stroke-miterlimit:6;stroke-opacity:0.5" />
+</svg>

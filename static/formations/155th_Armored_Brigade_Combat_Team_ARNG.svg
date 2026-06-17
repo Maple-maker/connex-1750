@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="400" height="600">
+<defs></defs><path  id="trim" d="M400,76.4C346.9,28.9,276.8,0,200,0S53.1,28.9,0,76.4v447.2C53.1,571.1,123.2,600,200,600s146.9-28.9,200-76.4V76.4z"/>
+<clipPath id="trim_out"><use xlink:href="#trim"/></clipPath>
+<g id="bend"><path d="M-130,195
+c55,0 55,25 110,25 s55,-25 110,-25
+c55,0 55,25 110,25 s55,-25 110,-25
+c55,0 55,25 110,25 s55,-25 110,-25 v185
+c-55,0 -55,25 -110,25 s-55,-25 -110,-25
+c-55,0 -55,25 -110,25 s-55,-25 -110,-25
+c-55,0 -55,25 -110,25 s-55,-25 -110,-25z" fill="#382" stroke="#141" stroke-width="4"/>
+<path id="bolt" d="M420,300l-121.9-7.2C309,276.6,320,260,320,260l-144.6,14.5L200,240l-220,60l121.9,7.2
+		C91,323.4,80,340,80,340l144.6-14.5L200,360L420,300z" fill="#eee" stroke="#777" stroke-width="4"/></g>
+<g clip-path="url(#trim_out)">
+<rect width="400" height="600" fill="#fc0"/>
+<use xlink:href="#bend" transform="rotate(56.31 200 300)"/></g>
+<g clip-path="url(#trim_out)"><use xlink:href="#trim" fill="none" stroke="#141" stroke-width="50"/>
+<use xlink:href="#trim" fill="none" stroke="#382" stroke-width="40"/>
+<use xlink:href="#trim" fill="none" stroke="#141" stroke-width="10"/></g>
+</svg>
