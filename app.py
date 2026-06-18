@@ -391,11 +391,12 @@ def ingest():
     # Create and store the job.
     job_id = uuid4().hex
     JOBS[job_id] = {
-        "boms":           boms,
-        "shr":            shr_dict,
-        "reconciliation": reconciliation,
-        "box_map":        box_map,
-        "created_at":     datetime.utcnow().isoformat(),
+        "boms":              boms,
+        "shr":               shr_dict,
+        "reconciliation":    reconciliation,
+        "box_map":           box_map,
+        "assigned_bom_ids":  set(),   # only boms explicitly placed by the user
+        "created_at":        datetime.utcnow().isoformat(),
     }
 
     return jsonify({
@@ -901,6 +902,7 @@ def api_assign_connex(connex_id):
     job  = JOBS[ingest_job_id]
     boms = job["boms"]
     box_map = job["box_map"]
+    assigned_bom_ids: set = job.setdefault("assigned_bom_ids", set())
     box_count = connex.get("box_count", len(connex.get("boxes", [])))
 
     warnings: list[str] = []
@@ -936,6 +938,7 @@ def api_assign_connex(connex_id):
             box_map = dict(box_map)
             for item in bom.get("items", []):
                 box_map.pop(packing.item_key(bom_id, item["line_no"]), None)
+            assigned_bom_ids.discard(bom_id)
             continue
 
         if move.get("separate"):
@@ -944,6 +947,7 @@ def api_assign_connex(connex_id):
             for item in bom.get("items", []):
                 key = packing.item_key(bom_id, item["line_no"])
                 box_map = packing.reassign(box_map, key, new_box)
+            assigned_bom_ids.add(bom_id)
             continue
 
         target_box = move.get("box_num")
@@ -962,13 +966,19 @@ def api_assign_connex(connex_id):
         for item in bom.get("items", []):
             key = packing.item_key(bom_id, item["line_no"])
             box_map = packing.reassign(box_map, key, target_box)
+        assigned_bom_ids.add(bom_id)
 
-    # Persist updated box_map back into the in-memory job.
+    # Persist updated box_map and assigned set back into the in-memory job.
     job["box_map"] = box_map
+    job["assigned_bom_ids"] = assigned_bom_ids
 
-    # Build bom_ids_by_box: {box_num: [bom_id, ...]}
+    # Build bom_ids_by_box ONLY from explicitly assigned boms.
+    # grouped_box_map pre-assigns everything; filtering here prevents a single
+    # user assignment from silently force-assigning all other BOMs.
     bom_ids_by_box: dict[int, list[str]] = {}
     for bom in boms:
+        if bom["bom_id"] not in assigned_bom_ids:
+            continue
         rep = _representative_box(bom, box_map)
         if rep is not None:
             bom_ids_by_box.setdefault(rep, []).append(bom["bom_id"])
