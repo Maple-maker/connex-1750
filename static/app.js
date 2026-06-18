@@ -72,6 +72,16 @@ const api = {
     if (!r.ok) throw { status: r.status, message: j.error || r.statusText };
     return j;
   },
+  async patch(url, body) {
+    const r = await fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json();
+    if (!r.ok) throw { status: r.status, message: j.error || r.statusText };
+    return j;
+  },
   async postForm(url, formData) {
     const r = await fetch(url, { method: "POST", body: formData });
     const j = await r.json();
@@ -644,7 +654,13 @@ function renderBomTableRows() {
       <td style="color:var(--connex-gray);font-size:var(--text-xs);">${idx + 1}</td>
       <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(bom.nomenclature || bom.filename)}">${esc(bom.nomenclature || bom.filename)}</td>
       <td class="cx-mono"><span class="cx-label-tag">LIN</span>${esc(lin || '—')}</td>
-      <td class="cx-mono"><span class="cx-label-tag">SN</span>${esc(sn || '—')}</td>
+      <td class="cx-mono" style="min-width:130px;">
+        <span class="cx-label-tag">SN</span>
+        <input class="cx-field cx-field--mono" style="display:inline;width:110px;padding:2px 4px;font-size:var(--text-xs);vertical-align:middle;"
+               value="${esc(sn)}" placeholder="—"
+               onblur="saveBomSerial('${esc(bom.bom_id)}', this.value)"
+               onclick="event.stopPropagation()">
+      </td>
       <td style="text-align:center;">${esc(String(bom.item_count || items.length || 0))}</td>
       <td>
         <select class="cx-field" style="min-width:120px;padding:4px 6px;font-size:var(--text-xs);"
@@ -769,7 +785,7 @@ function renderBoxStatusCards() {
     return `<div class="cx-panel cx-panel--2" style="margin-bottom:var(--space-2);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-2);">
         <strong style="color:var(--connex-light);">Box ${b.box_num}</strong>
-        <span class="${badgeCls}">${badgeText}</span>
+        <span class="${badgeCls}" id="box-badge-${b.box_num}">${badgeText}</span>
       </div>
       <div style="margin-bottom:var(--space-2);">${boxContentLines(b)}</div>
       <div class="cx-field-wrap" style="margin-bottom:var(--space-2);">
@@ -930,6 +946,24 @@ window.removeIndividualFromBox = async function(boxNum, idx) {
   }
 };
 
+window.saveBomSerial = async function(bomId, value) {
+  const bom = STATE.boms.find(b => b.bom_id === bomId);
+  if (!bom) return;
+  const trimmed = value.trim();
+  if (bom.serial_number === trimmed) return;  // no change
+  bom.serial_number = trimmed;
+  if (STATE.job_id) {
+    try {
+      await api.patch(`/api/job/${STATE.job_id}/bom/${bomId}`, { serial_number: trimmed });
+    } catch (e) {
+      console.error("saveBomSerial failed:", e.message);
+    }
+  }
+  // Refresh audit flags only — no full re-render needed
+  const audit = $("boxstatus-audit");
+  if (audit) audit.innerHTML = renderAuditFlagsHtml();
+};
+
 window.saveBoxField = async function(boxNum, field, value) {
   if (!STATE.connex) return;
   const box = STATE.connex.boxes.find(b => b.box_num === boxNum);
@@ -943,7 +977,19 @@ window.saveBoxField = async function(boxNum, field, value) {
     );
     const data = await api.put(`/api/connex/${STATE.connex.connex_id}`, { boxes: updatedBoxes });
     STATE.connex = data.connex;
-    refreshBoxStatusView();
+    // Surgical update — never re-create input elements (that kills focus mid-typing).
+    // Update only the badge for this box, the audit flags, and progress counters.
+    const updatedBox = STATE.connex.boxes.find(b => b.box_num === boxNum);
+    const badge = $(`box-badge-${boxNum}`);
+    if (badge && updatedBox) {
+      const [cls, text] = boxBadge(updatedBox);
+      badge.className = cls;
+      badge.textContent = text;
+    }
+    const audit = $("boxstatus-audit");
+    if (audit) audit.innerHTML = renderAuditFlagsHtml();
+    const progress = $("boxstatus-progress");
+    if (progress) progress.innerHTML = renderPackingProgress();
     // Keep the packing-page read-only summary in sync if it's mounted.
     const summary = $("packing-boxes");
     if (summary) summary.innerHTML = renderBoxSummaryCards();

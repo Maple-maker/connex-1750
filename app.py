@@ -546,6 +546,30 @@ def reconcile_report():
 
 
 # ---------------------------------------------------------------------------
+# PATCH /api/job/<job_id>/bom/<bom_id> — update editable fields on a BOM
+# ---------------------------------------------------------------------------
+
+@app.route("/api/job/<job_id>/bom/<bom_id>", methods=["PATCH"])
+def patch_bom(job_id, bom_id):
+    """
+    PATCH /api/job/<job_id>/bom/<bom_id>
+    Body: {"serial_number": "...", "lin": "..."}  (any subset)
+    Updates the in-memory BOM so subsequent PDF generation uses the new values.
+    """
+    job = JOBS.get(job_id)
+    if job is None:
+        return jsonify({"error": f"Job '{job_id}' not found."}), 404
+    bom = next((b for b in job["boms"] if b["bom_id"] == bom_id), None)
+    if bom is None:
+        return jsonify({"error": f"BOM '{bom_id}' not found in job."}), 404
+    data = request.get_json(silent=True) or {}
+    for field in ("serial_number", "lin"):
+        if field in data:
+            bom[field] = str(data[field]).strip()
+    return jsonify({"bom_id": bom_id, "serial_number": bom.get("serial_number", ""), "lin": bom.get("lin", "")})
+
+
+# ---------------------------------------------------------------------------
 # POST /generate-individuals — render one DD1750 per box, ZIP and stream
 # ---------------------------------------------------------------------------
 
