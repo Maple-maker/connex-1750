@@ -324,9 +324,9 @@ def generate_dd1750_overlay(
             can.drawCentredString(box_center_x, y_line1, str(item.line_no))
 
             # Line 1: description / model (left-aligned with padding)
+            # Wrapping/splitting is pre-computed in master_core.rows_to_bom_items.
             can.setFont("Helvetica", 8)
-            desc = item.description[:55] if len(item.description) > 55 else item.description
-            can.drawString(X_CONTENT_L + PAD_X, y_line1, desc)
+            can.drawString(X_CONTENT_L + PAD_X, y_line1, item.description)
 
             # Unit of Issue (centered) — always EA
             can.setFont("Helvetica", 9)
@@ -344,6 +344,11 @@ def generate_dd1750_overlay(
             # Total (f = d + e) — centered
             total_center_x = (X_TOTAL_L + X_TOTAL_R) / 2
             can.drawCentredString(total_center_x, y_line1, str(item.qty))
+
+        # Continuation rows that carry description overflow draw on line 1.
+        if item.is_continuation and item.description:
+            can.setFont("Helvetica", 8)
+            can.drawString(X_CONTENT_L + PAD_X, y_line1, item.description)
 
         # Line 2: NSN/SN text — drawn for all rows (primary and continuation).
         # Pre-split by rows_to_bom_items() so each chunk already fits the column.
@@ -489,6 +494,7 @@ def build_connex_header(
     box_count: int,
     box_nums_label: str,
     profile: dict = None,
+    include_seal: bool = False,
 ) -> "HeaderInfo":
     """
     Build a HeaderInfo for a single-box DD1750 from a Connex + Box dict.
@@ -551,7 +557,8 @@ def build_connex_header(
     end_lines.append(f"{sloc + ' ' if sloc else ''}INITIAL PACKING LIST")
     end_lines.append(f"CONTAINER #{cno}")
     end_lines.append(f"SUN: {sun}")
-    end_lines.append(f"SEAL: {seal}")
+    if include_seal:
+        end_lines.append(f"SEAL: {seal}")
     end_lines.append(f"MAJOR END ITEMS: ({box_count})")
     if box_nums_label:
         end_lines.append(f"BOX #S: {box_nums_label}")

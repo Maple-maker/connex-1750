@@ -1075,6 +1075,7 @@ def api_generate_connex(connex_id):
                     connex.get("box_count", 1),
                     "ALL",                      # box_nums_label for the master
                     profile or None,
+                    include_seal=True,
                 )
 
                 master_fd, master_path = tempfile.mkstemp(suffix=".pdf", dir=tmpdir)
@@ -1096,9 +1097,9 @@ def api_generate_connex(connex_id):
             for box in connex.get("boxes", []):
                 box_num = box["box_num"]
                 bom_items = []
-                line_seq = 1  # re-sequence line numbers across both sources
 
                 # Source 1: BOM component items from the ingest job.
+                # All items in this box carry the same box_num in column (a).
                 if boms and box_map:
                     for it in packing.items_for_box(boms, box_map, box_num):
                         nsn_str = it.get("nsn", "") or ""
@@ -1106,13 +1107,12 @@ def api_generate_connex(connex_id):
                         if sn:
                             nsn_str = (nsn_str + "  SN: " + sn).strip() if nsn_str else "SN: " + sn
                         bom_items.append(render_core.BomItem(
-                            line_no=line_seq,
+                            line_no=box_num,
                             description=it.get("description", ""),
                             nsn=nsn_str,
                             qty=it.get("qty", 1),
                             unit_of_issue=it.get("unit_of_issue", "EA"),
                         ))
-                        line_seq += 1
 
                 # Source 2: individual items on the box.
                 for item in box.get("individual_items", []):
@@ -1130,13 +1130,12 @@ def api_generate_connex(connex_id):
                     if sn_str:
                         parts.append(f"SN: {sn_str}")
                     bom_items.append(render_core.BomItem(
-                        line_no=line_seq,
+                        line_no=box_num,
                         description=desc,
                         nsn="  ".join(parts),
                         qty=1,
                         unit_of_issue="EA",
                     ))
-                    line_seq += 1
 
                 if not bom_items:
                     continue  # empty box — skip

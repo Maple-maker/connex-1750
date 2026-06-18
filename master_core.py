@@ -514,6 +514,7 @@ def condense_master_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 # Mirror render_core.py column geometry
 _CONTENT_AVAIL_PTS = 365.4 - 88.2 - 3.0   # 274.2 pts available in content col
 _LINE2_FONT_SIZE   = 7                      # Helvetica 7pt — must match render_core
+_DESC_FONT_SIZE    = 8                      # Helvetica 8pt for description lines
 
 
 def _str_width(text):
@@ -523,6 +524,35 @@ def _str_width(text):
         return pdfmetrics.stringWidth(text, "Helvetica", _LINE2_FONT_SIZE)
     except Exception:
         return len(text) * 4.2
+
+
+def _wrap_description(text):
+    """Split a description string into lines that fit within the content column.
+
+    Returns a list of strings, each fitting within _CONTENT_AVAIL_PTS at 8pt.
+    """
+    if not text:
+        return [""]
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        def width(t): return pdfmetrics.stringWidth(t, "Helvetica", _DESC_FONT_SIZE)
+    except Exception:
+        def width(t): return len(t) * 4.8  # ~4.8 pts/char at Helvetica 8pt
+
+    words = text.split()
+    lines = []
+    current = ""
+    for word in words:
+        candidate = (current + " " + word).strip() if current else word
+        if width(candidate) <= _CONTENT_AVAIL_PTS:
+            current = candidate
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines or [""]
 
 
 def _build_serial_lines(lin, nsn, serials):
@@ -595,15 +625,29 @@ def rows_to_bom_items(rows: List[Dict[str, Any]]):
         # already re-sequences to 1..N before calling here, so it is unaffected.
         box_no = int(r.get("box_num", i) or i)
 
+        raw_desc = normalize_model(str(r.get("model", "")))
+        desc_lines = _wrap_description(raw_desc)
         serial_lines = _build_serial_lines(lin, nsn, serials)
 
         items.append(BomItem(
             line_no=box_no,
-            description=normalize_model(str(r.get("model", ""))),
+            description=desc_lines[0],
             nsn=serial_lines[0],
             qty=qty,
             unit_of_issue="EA",
         ))
+
+        # Description overflow: each extra line is a continuation row with only
+        # the description set; the renderer draws it on line 1.
+        for desc_extra in desc_lines[1:]:
+            items.append(BomItem(
+                line_no=box_no,
+                description=desc_extra,
+                nsn="",
+                qty=qty,
+                unit_of_issue="EA",
+                is_continuation=True,
+            ))
 
         for extra in serial_lines[1:]:
             items.append(BomItem(

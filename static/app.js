@@ -990,21 +990,21 @@ function computeAuditFlags() {
   const allBoms = STATE.boms || [];
 
   const bomsNoLin = allBoms.filter(b => !b.lin);
-  if (bomsNoLin.length) flags.push({ type: "warn", msg: `${bomsNoLin.length} BOM(s) have no LIN — verify before sealing.` });
+  if (bomsNoLin.length) flags.push({ type: "warn", msg: `${bomsNoLin.length} BOM(s) have no LIN — verify before sealing.`, action: "go-packing" });
 
   const bomsNoSn = allBoms.filter(b => !b.serial_number);
-  if (bomsNoSn.length) flags.push({ type: "warn", msg: `${bomsNoSn.length} BOM(s) have no Serial Number.` });
+  if (bomsNoSn.length) flags.push({ type: "warn", msg: `${bomsNoSn.length} BOM(s) have no Serial Number.`, action: "go-packing" });
 
   const unassigned = allBoms.filter(b => !bomAssignedBox(b));
-  if (unassigned.length) flags.push({ type: "error", msg: `${unassigned.length} BOM(s) are not assigned to any box.` });
+  if (unassigned.length) flags.push({ type: "error", msg: `${unassigned.length} BOM(s) are not assigned to any box.`, action: "go-packing" });
 
   const populated = boxes.filter(b => (b.bom_ids && b.bom_ids.length) || (b.individual_items && b.individual_items.length));
   const emptyBoxes = boxes.filter(b => !(b.bom_ids && b.bom_ids.length) && !(b.individual_items && b.individual_items.length));
-  if (emptyBoxes.length) flags.push({ type: "error", msg: `Box(es) ${emptyBoxes.map(b => b.box_num).join(", ")} are empty — assign items or reduce box count.` });
+  if (emptyBoxes.length) flags.push({ type: "error", msg: `Box(es) ${emptyBoxes.map(b => b.box_num).join(", ")} are empty — assign items or reduce box count.`, action: "focus-box", box: emptyBoxes[0].box_num });
 
   populated.forEach(b => {
-    if (!b.sloc)     flags.push({ type: "warn", msg: `Box ${b.box_num}: missing SLOC.` });
-    if (!b.shrh_poc) flags.push({ type: "warn", msg: `Box ${b.box_num}: missing SHRH POC.` });
+    if (!b.sloc)     flags.push({ type: "warn", msg: `Box ${b.box_num}: missing SLOC.`,     action: "focus-sloc", box: b.box_num });
+    if (!b.shrh_poc) flags.push({ type: "warn", msg: `Box ${b.box_num}: missing SHRH POC.`, action: "focus-shrh", box: b.box_num });
   });
 
   if (!flags.length) flags.push({ type: "ok", msg: "All checks passed — connex is ready to seal." });
@@ -1012,7 +1012,12 @@ function computeAuditFlags() {
 }
 
 function renderAuditFlagsHtml() {
-  return computeAuditFlags().map(f => `<div class="cx-flag cx-flag--${f.type}">${esc(f.msg)}</div>`).join('');
+  return computeAuditFlags().map(f => {
+    if (f.action) {
+      return `<button class="cx-flag cx-flag--${f.type}" style="cursor:pointer;text-align:left;width:100%;background:none;border:none;padding:0;" onclick="navigateToAuditTarget('${f.action}',${f.box || 0})">${esc(f.msg)} &#8594;</button>`;
+    }
+    return `<div class="cx-flag cx-flag--${f.type}">${esc(f.msg)}</div>`;
+  }).join('');
 }
 
 /* =========================================================
@@ -1359,6 +1364,34 @@ window.downloadSitrepPdf = async function() {
 };
 
 /* =========================================================
+ * navigateToAuditTarget — click handler for audit flag items
+ * ========================================================= */
+window.navigateToAuditTarget = function(action, boxNum) {
+  if (action === "go-packing") {
+    goTo("PACKING");
+    return;
+  }
+  const focusInput = (id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.focus();
+  };
+  if (action === "focus-sloc" || action === "focus-shrh" || action === "focus-box") {
+    const inputId = action === "focus-sloc" ? `sloc-${boxNum}`
+                  : action === "focus-shrh" ? `shrh-${boxNum}`
+                  : `label-${boxNum}`;
+    if (STATE.step !== "BOX_STATUS") {
+      STATE.step = "BOX_STATUS";
+      renderAll();
+      requestAnimationFrame(() => focusInput(inputId));
+    } else {
+      focusInput(inputId);
+    }
+  }
+};
+
+/* =========================================================
  * toggleHelp
  * ========================================================= */
 window.toggleHelp = function(triggerBtn) {
@@ -1366,12 +1399,33 @@ window.toggleHelp = function(triggerBtn) {
   const popover = help && help.querySelector(".cx-help__popover");
   if (!popover) return;
   const isOpen = popover.classList.contains("cx-help__popover--open");
-  $$(".cx-help__popover--open").forEach(p => p.classList.remove("cx-help__popover--open"));
+  $$(".cx-help__popover--open").forEach(p => {
+    p.classList.remove("cx-help__popover--open");
+    p.style.cssText = "";
+  });
   if (!isOpen) {
     popover.classList.add("cx-help__popover--open");
+    // Clamp to viewport so it never gets cut off
+    requestAnimationFrame(() => {
+      const rect = popover.getBoundingClientRect();
+      if (rect.top < 8) {
+        // flip to below the trigger button
+        popover.style.bottom = "auto";
+        popover.style.top    = "calc(100% + 8px)";
+      }
+      if (rect.left < 8) {
+        popover.style.left      = "0";
+        popover.style.transform = "none";
+      } else if (rect.right > window.innerWidth - 8) {
+        popover.style.left      = "auto";
+        popover.style.right     = "0";
+        popover.style.transform = "none";
+      }
+    });
     const close = (e) => {
       if (!help.contains(e.target)) {
         popover.classList.remove("cx-help__popover--open");
+        popover.style.cssText = "";
         document.removeEventListener("click", close);
       }
     };
