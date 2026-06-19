@@ -680,6 +680,14 @@ function renderBomTableRows() {
           ${boxOptions}
         </select>
       </td>
+      <td style="text-align:center;">
+        <label title="Replace BOM file" style="cursor:pointer;color:var(--connex-gold);font-size:var(--text-xs);white-space:nowrap;">
+          ↺ Replace
+          <input type="file" accept=".pdf" style="display:none;"
+                 onchange="replaceBom('${esc(bom.bom_id)}', event)">
+        </label>
+        <div id="replace-status-${esc(bom.bom_id)}" class="cx-field-hint" style="display:inline;margin-left:4px;"></div>
+      </td>
     </tr>
     <tr id="items-${esc(bom.bom_id)}" style="display:${STATE.openBoms[bom.bom_id] ? '' : 'none'};">
       <td></td>
@@ -1454,6 +1462,37 @@ window.downloadMovementPackage = async function() {
 /* =========================================================
  * Save / Load session
  * ========================================================= */
+window.replaceBom = async function(bomId, event) {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = "";
+  if (!file || !STATE.job_id) return;
+
+  const statusEl = $(`replace-status-${bomId}`);
+  if (statusEl) statusEl.textContent = "…";
+
+  const fd = new FormData();
+  fd.append("bom", file);
+  try {
+    const data = await api.postForm(`/api/job/${STATE.job_id}/bom/${bomId}/replace`, fd);
+    if (data.item_box_map) STATE.itemBoxMap = data.item_box_map;
+
+    // Update the BOM in local state so the table reflects new item count.
+    const idx = STATE.boms.findIndex(b => b.bom_id === bomId);
+    if (idx >= 0) STATE.boms[idx] = { ...STATE.boms[idx], ...data.bom };
+
+    const d = data.diff;
+    const summary = d.added || d.removed
+      ? `+${d.added} −${d.removed}`
+      : "unchanged";
+    if (statusEl) statusEl.textContent = summary;
+
+    renderPackingStep($("cx-step-content"), $("cx-right-rail-content"));
+  } catch (e) {
+    if (statusEl) statusEl.textContent = "Error";
+    console.error("replaceBom failed:", e.message);
+  }
+};
+
 window.saveSession = async function() {
   if (!STATE.job_id) {
     showError("session-error", "No active job to save — ingest BOMs first.");

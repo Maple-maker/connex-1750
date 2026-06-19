@@ -571,6 +571,90 @@ def patch_bom(job_id, bom_id):
 
 
 # ---------------------------------------------------------------------------
+# POST /api/job/<job_id>/bom/<bom_id>/replace — replace a BOM file in-place
+# ---------------------------------------------------------------------------
+
+def _item_key_set(bom: dict) -> set:
+    """Return a frozenset of (line_no, description, nsn) tuples for diffing."""
+    return {
+        (it.get("line_no"), it.get("description", ""), it.get("nsn", ""))
+        for it in bom.get("items", [])
+    }
+
+
+@app.route("/api/job/<job_id>/bom/<bom_id>/replace", methods=["POST"])
+def replace_bom(job_id, bom_id):
+    """
+    POST /api/job/<job_id>/bom/<bom_id>/replace  multipart: bom (single PDF)
+    Replaces the BOM's items in-place, preserving box assignments for unchanged
+    line items and removing stale keys from box_map for removed items.
+    -> {diff: {added, removed}, bom: updated_bom_meta, item_box_map: updated}
+    """
+    job = job_store.load_job(job_id)
+    if job is None:
+        return jsonify({"error": f"Job '{job_id}' not found."}), 404
+
+    old_bom = next((b for b in job["boms"] if b["bom_id"] == bom_id), None)
+    if old_bom is None:
+        return jsonify({"error": f"BOM '{bom_id}' not found in job."}), 404
+
+    bom_file = request.files.get("bom")
+    if not bom_file or not bom_file.filename:
+        return jsonify({"error": "bom file required"}), 400
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        fname = bom_file.filename
+        safe  = secure_filename(fname) or "bom.pdf"
+        path  = os.path.join(tmpdir, safe)
+        bom_file.save(path)
+        nomenclature = os.path.splitext(fname)[0]
+        new_bom_data = bom_ingest.ingest_bom(path, nomenclature=nomenclature)
+
+    # Reuse the original bom_id so all box_map keys (bom_id:line_no) stay valid.
+    new_bom_data["bom_id"] = bom_id
+
+    # Compute item diff.
+    old_keys = _item_key_set(old_bom)
+    new_keys  = _item_key_set(new_bom_data)
+    added_keys   = new_keys - old_keys
+    removed_keys = old_keys - new_keys
+
+    # Remove stale box_map entries for items that no longer exist.
+    box_map = dict(job["box_map"])
+    old_line_nos = {it.get("line_no") for it in old_bom.get("items", [])}
+    new_line_nos  = {it.get("line_no") for it in new_bom_data.get("items", [])}
+    for gone_line in old_line_nos - new_line_nos:
+        box_map.pop(packing.item_key(bom_id, gone_line), None)
+
+    # Update the BOM in-place, preserving serial_number / lin edits.
+    new_bom_data["serial_number"] = old_bom.get("serial_number", "")
+    new_bom_data["lin"] = old_bom.get("lin", "")
+
+    job["boms"] = [new_bom_data if b["bom_id"] == bom_id else b for b in job["boms"]]
+    job["box_map"] = box_map
+    job_store.save_job(job_id, job)
+
+    bom_meta = {
+        "bom_id":        bom_id,
+        "filename":      new_bom_data.get("filename", fname),
+        "nomenclature":  new_bom_data.get("nomenclature", ""),
+        "model":         new_bom_data.get("model", ""),
+        "lin":           new_bom_data.get("lin", ""),
+        "serial_number": new_bom_data.get("serial_number", ""),
+        "item_count":    new_bom_data.get("item_count", 0),
+        "items":         new_bom_data.get("items", []),
+        "zero_on_hand":  new_bom_data.get("zero_on_hand", False),
+        "warnings":      new_bom_data.get("warnings", []),
+        "errors":        new_bom_data.get("errors", []),
+    }
+    return jsonify({
+        "diff":         {"added": len(added_keys), "removed": len(removed_keys)},
+        "bom":          bom_meta,
+        "item_box_map": box_map,
+    })
+
+
+# ---------------------------------------------------------------------------
 # GET  /api/job/<job_id>/export — download full job payload as JSON
 # POST /api/job/import         — restore a job from exported payload
 # ---------------------------------------------------------------------------
