@@ -625,9 +625,21 @@ function renderPackingStep(center, right) {
       <p class="cx-field-hint" style="margin-bottom:var(--space-2);">Label boxes and add SLOC / SHRH POC on the next page.</p>
       <div id="packing-boxes">${renderBoxSummaryCards()}</div>
     </div>
-    <div class="cx-panel">
+    <div class="cx-panel" style="margin-bottom:var(--space-3);">
       <h3 class="cx-panel__title">Progress</h3>
       <div id="packing-progress">${renderPackingProgress()}</div>
+    </div>
+    <div class="cx-panel">
+      <h3 class="cx-panel__title">Session</h3>
+      <p class="cx-field-hint" style="margin-bottom:var(--space-2);">Save your work and reload it in a future session.</p>
+      <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;">
+        <button class="cx-btn cx-btn--ghost" style="flex:1;" onclick="saveSession()">Save Session</button>
+        <label class="cx-btn cx-btn--ghost" style="flex:1;text-align:center;cursor:pointer;">
+          Load Session<input type="file" accept=".json" style="display:none;" onchange="loadSession(event)">
+        </label>
+      </div>
+      <div id="session-status" class="cx-field-hint" style="min-height:1.2em;margin-top:var(--space-2);"></div>
+      <div id="session-error" role="alert" class="cx-field-error-msg" style="display:none;margin-top:var(--space-2);"></div>
     </div>`;
 }
 
@@ -1436,6 +1448,87 @@ window.downloadMovementPackage = async function() {
   } catch (e) {
     if (status) status.textContent = "";
     showError("package-error", "Package failed: " + e.message);
+  }
+};
+
+/* =========================================================
+ * Save / Load session
+ * ========================================================= */
+window.saveSession = async function() {
+  if (!STATE.job_id) {
+    showError("session-error", "No active job to save — ingest BOMs first.");
+    return;
+  }
+  const status = $("session-status");
+  const errEl  = $("session-error");
+  if (errEl) errEl.style.display = "none";
+  if (status) status.textContent = "Saving…";
+  try {
+    const data = await api.get(`/api/job/${STATE.job_id}/export`);
+    // Bundle connex + profile context alongside the job so Load can reconnect.
+    const bundle = {
+      ...data,
+      connex_id:  STATE.connex  && STATE.connex.connex_id,
+      profile_id: STATE.profile && STATE.profile.profile_id,
+    };
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `CRATE_session_${STATE.connex && STATE.connex.connex_no || STATE.job_id}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+    if (status) status.textContent = "Saved.";
+  } catch (e) {
+    if (status) status.textContent = "";
+    showError("session-error", "Save failed: " + e.message);
+  }
+};
+
+window.loadSession = async function(event) {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = "";  // allow re-selecting the same file
+  if (!file) return;
+
+  const status = $("session-status");
+  const errEl  = $("session-error");
+  if (errEl) errEl.style.display = "none";
+  if (status) status.textContent = "Loading…";
+
+  try {
+    const text   = await file.text();
+    const bundle = JSON.parse(text);
+    if (!bundle.crate_export || !bundle.job) throw new Error("Not a valid CRATE session file.");
+
+    // Import job → new job_id on server.
+    const imp = await api.post("/api/job/import", { job: bundle.job });
+    STATE.job_id = imp.job_id;
+
+    // Restore BOM list from the imported job payload.
+    STATE.boms = (bundle.job.boms || []).map(b => ({ ...b, box_num: null }));
+    // item_box_map lets bomAssignedBox() compute box assignments client-side.
+    STATE.itemBoxMap = bundle.job.box_map || {};
+
+    // Reconnect to the original connex if still available.
+    if (bundle.connex_id) {
+      try {
+        const cx = await api.get(`/api/connex/${bundle.connex_id}`);
+        STATE.connex = cx.connex;
+        // Re-attach the newly imported job to the connex.
+        await api.post(`/api/connex/${bundle.connex_id}/attach`, { ingest_job_id: imp.job_id });
+      } catch (_) {
+        // Connex gone or server restarted — session job is loaded; connex must be recreated.
+        STATE.connex = null;
+      }
+    }
+
+    if (status) status.textContent = `Loaded ${imp.bom_count} BOM(s).`;
+    // Refresh packing step to show restored assignments.
+    renderPackingStep($("cx-step-content"), $("cx-right-rail-content"));
+  } catch (e) {
+    if (status) status.textContent = "";
+    showError("session-error", "Load failed: " + e.message);
   }
 };
 

@@ -571,6 +571,52 @@ def patch_bom(job_id, bom_id):
 
 
 # ---------------------------------------------------------------------------
+# GET  /api/job/<job_id>/export — download full job payload as JSON
+# POST /api/job/import         — restore a job from exported payload
+# ---------------------------------------------------------------------------
+
+@app.route("/api/job/<job_id>/export", methods=["GET"])
+def export_job(job_id):
+    """
+    GET /api/job/<job_id>/export
+    -> JSON file: {crate_export:1, job_id, job:{...}} suitable for /api/job/import.
+    assigned_bom_ids (a set) is serialized as a list for portability.
+    """
+    job = job_store.load_job(job_id)
+    if job is None:
+        return jsonify({"error": f"Job '{job_id}' not found."}), 404
+
+    payload = dict(job)
+    if isinstance(payload.get("assigned_bom_ids"), set):
+        payload["assigned_bom_ids"] = list(payload["assigned_bom_ids"])
+
+    return jsonify({"crate_export": 1, "job_id": job_id, "job": payload})
+
+
+@app.route("/api/job/import", methods=["POST"])
+def import_job():
+    """
+    POST /api/job/import  body: {job: {...}} (from /export)
+    Creates a new job_id from the payload and persists it.
+    -> {job_id, bom_count}
+    """
+    data = request.get_json(silent=True) or {}
+    job  = data.get("job")
+    if not job or not isinstance(job, dict):
+        return jsonify({"error": "job payload required"}), 400
+    if not job.get("boms"):
+        return jsonify({"error": "job payload has no BOMs"}), 400
+
+    if "assigned_bom_ids" in job:
+        job["assigned_bom_ids"] = set(job["assigned_bom_ids"])
+    job["created_at"] = datetime.utcnow().isoformat()
+
+    new_job_id = uuid4().hex
+    job_store.save_job(new_job_id, job)
+    return jsonify({"job_id": new_job_id, "bom_count": len(job.get("boms", []))})
+
+
+# ---------------------------------------------------------------------------
 # POST /generate-individuals — render one DD1750 per box, ZIP and stream
 # ---------------------------------------------------------------------------
 

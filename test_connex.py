@@ -595,10 +595,13 @@ class TestAssignWarnings(unittest.TestCase):
         fake_box_map = {item_key: 1}
 
         self._job_id = "job_test_warn"
-        _app.JOBS[self._job_id] = {
+        import job_store as _js
+        _js.save_job(self._job_id, {
             "boms": [fake_bom],
             "box_map": fake_box_map,
-        }
+            "assigned_bom_ids": set(),
+        })
+        self._js = _js
 
         # Attach the fake job to the connex (patch_connex accepts ingest_job_id).
         connex_store.patch_connex(connex_id, {"ingest_job_id": self._job_id})
@@ -607,7 +610,7 @@ class TestAssignWarnings(unittest.TestCase):
         self._connex_id = connex_id
 
     def tearDown(self):
-        self._app.JOBS.pop(self._job_id, None)
+        pass  # SQLite job will be overwritten on next setUp; no cleanup needed
 
     def test_unknown_bom_id_returns_warning(self):
         """A move with a bom_id not in the attached job must produce a warning."""
