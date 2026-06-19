@@ -535,11 +535,16 @@ window.createConnex = async function() {
  * Right rail: Box status cards (live updates)
  * ========================================================= */
 function renderPackingStep(center, right) {
-  const hasBoms = STATE.boms.length > 0;
+  const hasBoms  = STATE.boms.length > 0;
+  const isSealed = STATE.connex && STATE.connex.status === 'sealed';
   center.innerHTML = `
     <div class="cx-panel" style="margin-bottom:var(--space-3);">
       <h2 class="cx-panel__title">3 &middot; Packing</h2>
-      <p class="cx-field-hint">Ingest BOM PDFs, then assign each to a box using the table below.</p>
+      ${isSealed
+        ? `<div style="background:var(--connex-gold);color:#1a1a1a;padding:var(--space-2) var(--space-3);border-radius:var(--radius-sm);font-size:var(--text-sm);font-weight:600;margin-bottom:var(--space-2);">
+             🔒 SEALED — assignments are locked. Re-seal to update.
+           </div>`
+        : `<p class="cx-field-hint">Ingest BOM PDFs, then assign each to a box using the table below.</p>`}
     </div>
 
     <div class="cx-panel" style="margin-bottom:var(--space-3);">
@@ -574,6 +579,7 @@ function renderPackingStep(center, right) {
                  <th>SN</th>
                  <th>Subitems</th>
                  <th>Assign to Box</th>
+                 <th></th>
                </tr></thead>
                <tbody id="bom-table-body">${renderBomTableRows()}</tbody>
              </table>
@@ -645,6 +651,7 @@ function renderPackingStep(center, right) {
 
 function renderBomTableRows() {
   if (!STATE.connex) return '';
+  const isSealed = STATE.connex.status === 'sealed';
   return STATE.boms.map((bom, idx) => {
     const assignedBox = bomAssignedBox(bom);
     const boxOptions = [
@@ -661,6 +668,20 @@ function renderBomTableRows() {
                  id="exp-${esc(bom.bom_id)}"
                  style="background:none;border:none;color:var(--connex-gold);cursor:pointer;font-size:0.9rem;padding:0 4px;">&#9656;</button>`
       : '';
+    const assignCell = isSealed
+      ? `<span style="color:var(--connex-gray);font-size:var(--text-xs);">🔒 Box ${assignedBox || '—'}</span>`
+      : `<select class="cx-field" style="min-width:120px;padding:4px 6px;font-size:var(--text-xs);"
+                onchange="assignBomToBoxFromSelect('${esc(bom.bom_id)}', this.value)">
+          ${boxOptions}
+        </select>`;
+    const replaceCell = isSealed
+      ? `<span style="color:var(--connex-gray);font-size:var(--text-xs);">🔒</span>`
+      : `<label title="Replace BOM file" style="cursor:pointer;color:var(--connex-gold);font-size:var(--text-xs);white-space:nowrap;">
+          ↺ Replace
+          <input type="file" accept=".pdf" style="display:none;"
+                 onchange="replaceBom('${esc(bom.bom_id)}', event)">
+        </label>
+        <div id="replace-status-${esc(bom.bom_id)}" class="cx-field-hint" style="display:inline;margin-left:4px;"></div>`;
     return `<tr>
       <td style="text-align:center;width:24px;">${expander}</td>
       <td style="color:var(--connex-gray);font-size:var(--text-xs);">${idx + 1}</td>
@@ -669,25 +690,13 @@ function renderBomTableRows() {
       <td class="cx-mono" style="min-width:130px;">
         <span class="cx-label-tag">SN</span>
         <input class="cx-field cx-field--mono" style="display:inline;width:110px;padding:2px 4px;font-size:var(--text-xs);vertical-align:middle;"
-               value="${esc(sn)}" placeholder="—"
+               value="${esc(sn)}" placeholder="—" ${isSealed ? 'disabled' : ''}
                onblur="saveBomSerial('${esc(bom.bom_id)}', this.value)"
                onclick="event.stopPropagation()">
       </td>
       <td style="text-align:center;">${esc(String(bom.item_count || items.length || 0))}</td>
-      <td>
-        <select class="cx-field" style="min-width:120px;padding:4px 6px;font-size:var(--text-xs);"
-                onchange="assignBomToBoxFromSelect('${esc(bom.bom_id)}', this.value)">
-          ${boxOptions}
-        </select>
-      </td>
-      <td style="text-align:center;">
-        <label title="Replace BOM file" style="cursor:pointer;color:var(--connex-gold);font-size:var(--text-xs);white-space:nowrap;">
-          ↺ Replace
-          <input type="file" accept=".pdf" style="display:none;"
-                 onchange="replaceBom('${esc(bom.bom_id)}', event)">
-        </label>
-        <div id="replace-status-${esc(bom.bom_id)}" class="cx-field-hint" style="display:inline;margin-left:4px;"></div>
-      </td>
+      <td>${assignCell}</td>
+      <td style="text-align:center;">${replaceCell}</td>
     </tr>
     <tr id="items-${esc(bom.bom_id)}" style="display:${STATE.openBoms[bom.bom_id] ? '' : 'none'};">
       <td></td>

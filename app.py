@@ -1046,6 +1046,12 @@ def api_assign_connex(connex_id):
     if connex is None:
         return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
 
+    if connex.get("status") == "sealed":
+        return jsonify({
+            "error": "Connex is sealed — assignments are locked. Unseal before making changes.",
+            "code": "SEALED",
+        }), 409
+
     ingest_job_id = connex.get("ingest_job_id")
     if not ingest_job_id or not job_store.job_exists(ingest_job_id):
         return jsonify({
