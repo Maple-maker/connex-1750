@@ -1541,6 +1541,102 @@ def api_sitrep_pdf():
     )
 
 
+@app.route("/api/session-packet", methods=["POST"])
+def api_session_packet():
+    """
+    POST /api/session-packet  body: {connex_ids: [...]}
+    -> single PDF: SITREP + Master DD1750 for each connex, merged into one file.
+    Intended for commanders who want one document to brief and file.
+    """
+    import sitrep_render
+    import pypdf
+
+    data       = request.get_json(silent=True) or {}
+    connex_ids = data.get("connex_ids") or []
+    if not connex_ids:
+        return jsonify({"error": "connex_ids required"}), 400
+
+    # --- SITREP section -------------------------------------------------------
+    connexes   = [_connex_store.load_connex(i) for i in connex_ids]
+    connexes   = [c for c in connexes if c is not None]
+    if not connexes:
+        return jsonify({"error": "No valid connexes found."}), 400
+
+    boms_by_id: dict = {}
+    for cx in connexes:
+        jid = cx.get("ingest_job_id")
+        if jid and job_store.job_exists(jid):
+            _jb = job_store.load_job(jid)
+            for bom in (_jb or {}).get("boms", []):
+                boms_by_id[bom["bom_id"]] = bom
+
+    sitrep_data = _sitrep.build_sitrep(connexes, profile=None)
+    if boms_by_id:
+        sitrep_data = _sitrep.enrich_sitrep_boms(sitrep_data, boms_by_id)
+    sitrep_bytes = sitrep_render.render_sitrep_pdf(sitrep_data)
+
+    # --- Per-connex Master 1750 sections --------------------------------------
+    writer = pypdf.PdfWriter()
+
+    # Append SITREP pages.
+    writer.append(io.BytesIO(sitrep_bytes))
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for cx_id in connex_ids:
+            cx = _connex_store.load_connex(cx_id)
+            if cx is None:
+                continue
+
+            ingest_job_id = cx.get("ingest_job_id")
+            job     = job_store.load_job(ingest_job_id) if ingest_job_id else None
+            boms    = job["boms"]    if job else []
+            box_map = job["box_map"] if job else {}
+            profile = _profiles.load_profile(cx.get("profile_id", "")) or {}
+
+            master_rows = packing.boxes_to_master_rows(boms, box_map) if boms and box_map else []
+            for box in cx.get("boxes", []):
+                for item in box.get("individual_items", []):
+                    desc = (item.get("description") or "").strip()
+                    if not desc:
+                        continue
+                    master_rows.append({
+                        "box_num": box["box_num"],
+                        "model":   desc,
+                        "lin":     (item.get("lin") or "").strip(),
+                        "nsn":     (item.get("nsn") or "").strip(),
+                        "serials": [],
+                        "qty":     1,
+                    })
+
+            if not master_rows:
+                continue
+
+            condensed        = master_core.condense_master_rows(master_rows)
+            master_bom_items = master_core.rows_to_bom_items(condensed)
+            master_hdr       = render_core.build_connex_header(
+                cx, {}, cx.get("box_count", 1), "ALL", profile or None, include_seal=True,
+            )
+
+            mfd, mpath = tempfile.mkstemp(suffix=".pdf", dir=tmpdir)
+            os.close(mfd)
+            render_core.generate_dd1750_from_items(
+                master_bom_items, TEMPLATE_PDF, mpath,
+                header=master_hdr, draw_master_header_fn=render_core.draw_master_header,
+            )
+            writer.append(mpath)
+
+    merged = io.BytesIO()
+    writer.write(merged)
+    merged.seek(0)
+
+    return send_file(
+        merged,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name="Movement_Packet.pdf",
+    )
+
+
 @app.route("/api/session-package", methods=["POST"])
 def api_session_package():
     """

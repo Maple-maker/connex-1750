@@ -1359,12 +1359,15 @@ function renderNextSitrepStep(center, right) {
         <button class="cx-btn cx-btn--ghost"   onclick="loadAndShowSitrep()">Generate SITREP PDF</button>
       </div>
       ${STATE.sessionConnexIds.length ? `
-      <div style="margin-top:var(--space-4);">
+      <div style="margin-top:var(--space-4);display:flex;flex-direction:column;gap:var(--space-2);">
         <button class="cx-btn cx-btn--primary" style="width:100%;" onclick="downloadMovementPackage()">
-          Download Full Package (DD1750s + SITREP)
+          &#x1F4E6; Download Full Package (ZIP — all DD1750s + SITREP)
         </button>
-        <div id="package-status" class="cx-field-hint" style="min-height:1.2em;margin-top:var(--space-2);"></div>
-        <div id="package-error" role="alert" class="cx-field-error-msg" style="display:none;margin-top:var(--space-2);"></div>
+        <button class="cx-btn cx-btn--ghost" style="width:100%;" onclick="downloadMovementPacket()">
+          &#x1F4C4; Download Packet PDF (SITREP + Master 1750s, one file)
+        </button>
+        <div id="package-status" class="cx-field-hint" style="min-height:1.2em;"></div>
+        <div id="package-error" role="alert" class="cx-field-error-msg" style="display:none;"></div>
       </div>` : ""}
       <div id="sitrep-content" style="margin-top:var(--space-4);"></div>
       <div id="sitrep-error" role="alert" class="cx-field-error-msg" style="display:none;margin-top:var(--space-2);"></div>
@@ -1462,6 +1465,25 @@ window.downloadMovementPackage = async function() {
 /* =========================================================
  * Save / Load session
  * ========================================================= */
+window.downloadMovementPacket = async function() {
+  if (!STATE.sessionConnexIds.length) return;
+  const status = $("package-status");
+  const errEl  = $("package-error");
+  if (errEl) errEl.style.display = "none";
+  if (status) status.textContent = "Building packet PDF…";
+  try {
+    await api.download(
+      "/api/session-packet",
+      { connex_ids: STATE.sessionConnexIds },
+      "Movement_Packet.pdf"
+    );
+    if (status) status.textContent = "Downloaded.";
+  } catch (e) {
+    if (status) status.textContent = "";
+    showError("package-error", "Packet failed: " + e.message);
+  }
+};
+
 window.replaceBom = async function(bomId, event) {
   const file = event.target.files && event.target.files[0];
   event.target.value = "";
