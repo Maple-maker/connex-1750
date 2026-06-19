@@ -1338,6 +1338,14 @@ function renderNextSitrepStep(center, right) {
         <button class="cx-btn cx-btn--primary" onclick="startAnotherConnex()">Prepare Another Connex</button>
         <button class="cx-btn cx-btn--ghost"   onclick="loadAndShowSitrep()">Generate SITREP PDF</button>
       </div>
+      ${STATE.sessionConnexIds.length ? `
+      <div style="margin-top:var(--space-4);">
+        <button class="cx-btn cx-btn--primary" style="width:100%;" onclick="downloadMovementPackage()">
+          Download Full Package (DD1750s + SITREP)
+        </button>
+        <div id="package-status" class="cx-field-hint" style="min-height:1.2em;margin-top:var(--space-2);"></div>
+        <div id="package-error" role="alert" class="cx-field-error-msg" style="display:none;margin-top:var(--space-2);"></div>
+      </div>` : ""}
       <div id="sitrep-content" style="margin-top:var(--space-4);"></div>
       <div id="sitrep-error" role="alert" class="cx-field-error-msg" style="display:none;margin-top:var(--space-2);"></div>
     </div>`;
@@ -1346,6 +1354,9 @@ function renderNextSitrepStep(center, right) {
     <div class="cx-panel">
       <h3 class="cx-panel__title">SITREP</h3>
       <p class="cx-field-hint">Commander's summary PDF covers all sealed connexes in this session.</p>
+      <p class="cx-field-hint" style="margin-top:var(--space-3);">
+        <strong>Full Package</strong> bundles all DD1750s + SITREP into one ZIP — hand the movement officer one file.
+      </p>
     </div>`;
 }
 
@@ -1406,6 +1417,25 @@ window.downloadSitrepPdf = async function() {
     await api.download("/api/sitrep/pdf", body, "SITREP.pdf");
   } catch (e) {
     showError("sitrep-error", "SITREP PDF failed: " + e.message);
+  }
+};
+
+window.downloadMovementPackage = async function() {
+  if (!STATE.sessionConnexIds.length) return;
+  const status = $("package-status");
+  const errEl  = $("package-error");
+  if (errEl) errEl.style.display = "none";
+  if (status) status.textContent = "Building package…";
+  try {
+    await api.download(
+      "/api/session-package",
+      { connex_ids: STATE.sessionConnexIds },
+      "Movement_Package.zip"
+    );
+    if (status) status.textContent = "Downloaded.";
+  } catch (e) {
+    if (status) status.textContent = "";
+    showError("package-error", "Package failed: " + e.message);
   }
 };
 

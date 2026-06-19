@@ -1030,6 +1030,111 @@ def api_seal_connex(connex_id):
     return jsonify(result)
 
 
+def _connex_pdfs_into_zip(connex_id: str, zf: "zipfile.ZipFile", folder: str, tmpdir: str) -> int:
+    """
+    Generate Master_1750.pdf + per-box PDFs for one connex and write them into
+    an already-open ZipFile under `folder` (e.g. "Connex_C001/").
+    Returns the number of per-box PDFs written (0 = connex was empty/not found).
+    """
+    connex = _connex_store.load_connex(connex_id)
+    if connex is None:
+        return 0
+
+    ingest_job_id = connex.get("ingest_job_id")
+    job     = JOBS.get(ingest_job_id) if ingest_job_id else None
+    boms    = job["boms"]    if job else []
+    box_map = job["box_map"] if job else {}
+    profile = _profiles.load_profile(connex.get("profile_id", "")) or {}
+
+    # Build master rows from both BOM and individual-item sources.
+    master_rows = packing.boxes_to_master_rows(boms, box_map) if boms and box_map else []
+    for box in connex.get("boxes", []):
+        box_num = box["box_num"]
+        for item in box.get("individual_items", []):
+            desc = (item.get("description") or "").strip()
+            if not desc:
+                continue
+            master_rows.append({
+                "box_num": box_num,
+                "model":   desc,
+                "lin":     (item.get("lin") or "").strip(),
+                "nsn":     (item.get("nsn") or "").strip(),
+                "serials": [(item.get("sn") or "").strip()] if (item.get("sn") or "").strip() else [],
+                "qty":     1,
+            })
+
+    if master_rows:
+        condensed        = master_core.condense_master_rows(master_rows)
+        master_bom_items = master_core.rows_to_bom_items(condensed)
+        master_hdr       = render_core.build_connex_header(
+            connex, {}, connex.get("box_count", 1), "ALL", profile or None, include_seal=True,
+        )
+        master_fd, master_path = tempfile.mkstemp(suffix=".pdf", dir=tmpdir)
+        os.close(master_fd)
+        render_core.generate_dd1750_from_items(
+            master_bom_items, TEMPLATE_PDF, master_path,
+            header=master_hdr, draw_master_header_fn=render_core.draw_master_header,
+        )
+        with open(master_path, "rb") as fh:
+            zf.writestr(f"{folder}Master_1750.pdf", fh.read())
+
+    rendered = 0
+    for box in connex.get("boxes", []):
+        box_num   = box["box_num"]
+        bom_items = []
+
+        if boms and box_map:
+            for it in packing.items_for_box(boms, box_map, box_num):
+                nsn_str = it.get("nsn", "") or ""
+                sn = (it.get("serial_number") or "").strip()
+                if sn:
+                    nsn_str = (nsn_str + "  SN: " + sn).strip() if nsn_str else "SN: " + sn
+                bom_items.append(render_core.BomItem(
+                    line_no=box_num,
+                    description=it.get("description", ""),
+                    nsn=nsn_str,
+                    qty=it.get("qty", 1),
+                    unit_of_issue=it.get("unit_of_issue", "EA"),
+                ))
+
+        for item in box.get("individual_items", []):
+            desc = (item.get("description") or "").strip()
+            if not desc:
+                continue
+            nsn_str = (item.get("nsn") or "").strip()
+            lin_str = (item.get("lin") or "").strip()
+            sn_str  = (item.get("sn")  or "").strip()
+            parts   = []
+            if nsn_str: parts.append(nsn_str)
+            if lin_str: parts.append(f"LIN: {lin_str}")
+            if sn_str:  parts.append(f"SN: {sn_str}")
+            bom_items.append(render_core.BomItem(
+                line_no=box_num,
+                description=desc,
+                nsn="  ".join(parts),
+                qty=1,
+                unit_of_issue="EA",
+            ))
+
+        if not bom_items:
+            continue
+
+        hdr = render_core.build_connex_header(
+            connex, box, connex.get("box_count", 1), str(box_num), profile or None,
+        )
+        out_fd, out_path = tempfile.mkstemp(suffix=".pdf", dir=tmpdir)
+        os.close(out_fd)
+        render_core.generate_dd1750_from_items(
+            bom_items, TEMPLATE_PDF, out_path,
+            header=hdr, draw_master_header_fn=render_core.draw_master_header,
+        )
+        with open(out_path, "rb") as fh:
+            zf.writestr(f"{folder}Box_{box_num:03d}.pdf", fh.read())
+        rendered += 1
+
+    return rendered
+
+
 @app.route("/api/connex/<connex_id>/generate", methods=["POST"])
 def api_generate_connex(connex_id):
     """
@@ -1300,6 +1405,66 @@ def api_sitrep_pdf():
         pdf_bytes,
         mimetype="application/pdf",
         headers={"Content-Disposition": "attachment; filename=sitrep.pdf"},
+    )
+
+
+@app.route("/api/session-package", methods=["POST"])
+def api_session_package():
+    """
+    POST /api/session-package  body: {connex_ids: ["id1", "id2", ...]}
+    -> ZIP: Movement_Package.zip containing per-connex DD1750s + SITREP.pdf
+
+    ZIP structure:
+      Connex_<label>/Master_1750.pdf
+      Connex_<label>/Box_001.pdf
+      ...
+      SITREP.pdf
+    """
+    import sitrep_render
+
+    data       = request.get_json(silent=True) or {}
+    connex_ids = data.get("connex_ids") or []
+    if not connex_ids:
+        return jsonify({"error": "connex_ids required"}), 400
+
+    zip_buffer    = io.BytesIO()
+    total_boxes   = 0
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+
+            for cx_id in connex_ids:
+                cx = _connex_store.load_connex(cx_id)
+                if cx is None:
+                    continue
+                label  = re.sub(r'[^\w\-]', '_', cx.get("connex_no") or cx_id)[:30]
+                folder = f"Connex_{label}/"
+                total_boxes += _connex_pdfs_into_zip(cx_id, zf, folder, tmpdir)
+
+            # SITREP across all provided connexes.
+            connexes = [_connex_store.load_connex(i) for i in connex_ids]
+            connexes = [c for c in connexes if c is not None]
+            if connexes:
+                boms_by_id: dict = {}
+                for cx in connexes:
+                    jid = cx.get("ingest_job_id")
+                    if jid and jid in JOBS:
+                        for bom in JOBS[jid].get("boms", []):
+                            boms_by_id[bom["bom_id"]] = bom
+                sitrep_data = _sitrep.build_sitrep(connexes, profile=None)
+                if boms_by_id:
+                    sitrep_data = _sitrep.enrich_sitrep_boms(sitrep_data, boms_by_id)
+                zf.writestr("SITREP.pdf", sitrep_render.render_sitrep_pdf(sitrep_data))
+
+    if total_boxes == 0:
+        return jsonify({"error": "No occupied boxes found for the provided connex IDs."}), 400
+
+    zip_buffer.seek(0)
+    return send_file(
+        zip_buffer,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name="Movement_Package.zip",
     )
 
 
