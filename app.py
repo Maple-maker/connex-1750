@@ -37,6 +37,7 @@ import reconcile as reconcile_mod
 import packing
 import master_core
 import render_core
+import job_store
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB batch ceiling
@@ -44,9 +45,7 @@ app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB batch ceiling
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_PDF = os.path.join(BASE_DIR, "blank_1750.pdf")
 
-# In-memory job store.  Assumes a single gunicorn worker — fine for this
-# single-user tool.  Each key is a uuid4 hex; value is the full job dict.
-JOBS: dict = {}
+job_store.init_db()
 
 
 # ---------------------------------------------------------------------------
@@ -390,14 +389,14 @@ def ingest():
 
     # Create and store the job.
     job_id = uuid4().hex
-    JOBS[job_id] = {
+    job_store.save_job(job_id, {
         "boms":              boms,
         "shr":               shr_dict,
         "reconciliation":    reconciliation,
         "box_map":           box_map,
         "assigned_bom_ids":  set(),   # only boms explicitly placed by the user
         "created_at":        datetime.utcnow().isoformat(),
-    }
+    })
 
     return jsonify({
         "job_id":           job_id,
@@ -427,7 +426,7 @@ def assign():
     """
     data = request.get_json(silent=True) or {}
     job_id = data.get("job_id")
-    job = JOBS.get(job_id)
+    job = job_store.load_job(job_id)
     if job is None:
         return jsonify({"error": f"Job '{job_id}' not found."}), 404
 
@@ -478,8 +477,8 @@ def assign():
                 key = packing.item_key(bom_id, item["line_no"])
                 box_map = packing.reassign(box_map, key, target_box)
 
-    # Persist the updated map back into the job.
     job["box_map"] = box_map
+    job_store.save_job(job_id, job)
 
     # Build box_by_bom: bom_id -> representative box.
     box_by_bom = {}
@@ -508,13 +507,14 @@ def regroup():
     """
     data = request.get_json(silent=True) or {}
     job_id = data.get("job_id")
-    job = JOBS.get(job_id)
+    job = job_store.load_job(job_id)
     if job is None:
         return jsonify({"error": f"Job '{job_id}' not found."}), 404
 
     boms = job["boms"]
     box_map = packing.grouped_box_map(boms)
     job["box_map"] = box_map
+    job_store.save_job(job_id, job)
 
     box_by_bom = {b["bom_id"]: _representative_box(b, box_map) for b in boms}
     return jsonify({
@@ -535,7 +535,7 @@ def reconcile_report():
     """
     data = request.get_json(silent=True) or {}
     job_id = data.get("job_id")
-    job = JOBS.get(job_id)
+    job = job_store.load_job(job_id)
     if job is None:
         return jsonify({"error": f"Job '{job_id}' not found."}), 404
 
@@ -556,7 +556,7 @@ def patch_bom(job_id, bom_id):
     Body: {"serial_number": "...", "lin": "..."}  (any subset)
     Updates the in-memory BOM so subsequent PDF generation uses the new values.
     """
-    job = JOBS.get(job_id)
+    job = job_store.load_job(job_id)
     if job is None:
         return jsonify({"error": f"Job '{job_id}' not found."}), 404
     bom = next((b for b in job["boms"] if b["bom_id"] == bom_id), None)
@@ -566,6 +566,7 @@ def patch_bom(job_id, bom_id):
     for field in ("serial_number", "lin"):
         if field in data:
             bom[field] = str(data[field]).strip()
+    job_store.save_job(job_id, job)
     return jsonify({"bom_id": bom_id, "serial_number": bom.get("serial_number", ""), "lin": bom.get("lin", "")})
 
 
@@ -582,7 +583,7 @@ def generate_individuals():
     """
     data = request.get_json(silent=True) or {}
     job_id = data.get("job_id")
-    job = JOBS.get(job_id)
+    job = job_store.load_job(job_id)
     if job is None:
         return jsonify({"error": f"Job '{job_id}' not found."}), 404
 
@@ -726,7 +727,7 @@ def generate_master():
     """
     data = request.get_json(silent=True) or {}
     job_id = data.get("job_id")
-    job = JOBS.get(job_id)
+    job = job_store.load_job(job_id)
     if job is None:
         return jsonify({"error": f"Job '{job_id}' not found."}), 404
 
@@ -892,7 +893,7 @@ def api_attach_connex(connex_id):
     ingest_job_id = data.get("ingest_job_id", "")
     if not ingest_job_id:
         return jsonify({"error": "ingest_job_id is required.", "code": "MISSING_FIELDS"}), 400
-    if ingest_job_id not in JOBS:
+    if not job_store.job_exists(ingest_job_id):
         return jsonify({"error": f"Job '{ingest_job_id}' not found.", "code": "NOT_FOUND"}), 404
 
     connex = _connex_store.attach_ingest_job(connex_id, ingest_job_id)
@@ -916,14 +917,14 @@ def api_assign_connex(connex_id):
         return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
 
     ingest_job_id = connex.get("ingest_job_id")
-    if not ingest_job_id or ingest_job_id not in JOBS:
+    if not ingest_job_id or not job_store.job_exists(ingest_job_id):
         return jsonify({
             "error": "This connex has no attached ingest job. Call /attach first.",
             "code": "NO_JOB",
         }), 400
 
     data = request.get_json(silent=True) or {}
-    job  = JOBS[ingest_job_id]
+    job  = job_store.load_job(ingest_job_id)
     boms = job["boms"]
     box_map = job["box_map"]
     assigned_bom_ids: set = job.setdefault("assigned_bom_ids", set())
@@ -992,9 +993,9 @@ def api_assign_connex(connex_id):
             box_map = packing.reassign(box_map, key, target_box)
         assigned_bom_ids.add(bom_id)
 
-    # Persist updated box_map and assigned set back into the in-memory job.
     job["box_map"] = box_map
     job["assigned_bom_ids"] = assigned_bom_ids
+    job_store.save_job(ingest_job_id, job)
 
     # Build bom_ids_by_box ONLY from explicitly assigned boms.
     # grouped_box_map pre-assigns everything; filtering here prevents a single
@@ -1041,7 +1042,7 @@ def _connex_pdfs_into_zip(connex_id: str, zf: "zipfile.ZipFile", folder: str, tm
         return 0
 
     ingest_job_id = connex.get("ingest_job_id")
-    job     = JOBS.get(ingest_job_id) if ingest_job_id else None
+    job     = job_store.load_job(ingest_job_id) if ingest_job_id else None
     boms    = job["boms"]    if job else []
     box_map = job["box_map"] if job else {}
     profile = _profiles.load_profile(connex.get("profile_id", "")) or {}
@@ -1154,7 +1155,7 @@ def api_generate_connex(connex_id):
 
     # Load BOM data from an attached job when present; not required.
     ingest_job_id = connex.get("ingest_job_id")
-    job = JOBS.get(ingest_job_id) if ingest_job_id else None
+    job = job_store.load_job(ingest_job_id) if ingest_job_id else None
     boms    = job["boms"]    if job else []
     box_map = job["box_map"] if job else {}
 
@@ -1362,8 +1363,9 @@ def api_sitrep():
     boms_by_id: dict[str, dict] = {}
     for cx in connexes:
         jid = cx.get("ingest_job_id")
-        if jid and jid in JOBS:
-            for bom in JOBS[jid].get("boms", []):
+        if jid and job_store.job_exists(jid):
+            _jb = job_store.load_job(jid)
+            for bom in (_jb or {}).get("boms", []):
                 boms_by_id[bom["bom_id"]] = bom
 
     sitrep = _sitrep.build_sitrep(connexes, profile=profile)
@@ -1390,8 +1392,9 @@ def api_sitrep_pdf():
     boms_by_id: dict[str, dict] = {}
     for cx in connexes:
         jid = cx.get("ingest_job_id")
-        if jid and jid in JOBS:
-            for bom in JOBS[jid].get("boms", []):
+        if jid and job_store.job_exists(jid):
+            _jb = job_store.load_job(jid)
+            for bom in (_jb or {}).get("boms", []):
                 boms_by_id[bom["bom_id"]] = bom
 
     sitrep = _sitrep.build_sitrep(connexes, profile=profile)
@@ -1448,8 +1451,9 @@ def api_session_package():
                 boms_by_id: dict = {}
                 for cx in connexes:
                     jid = cx.get("ingest_job_id")
-                    if jid and jid in JOBS:
-                        for bom in JOBS[jid].get("boms", []):
+                    if jid and job_store.job_exists(jid):
+                        _jb = job_store.load_job(jid)
+                        for bom in (_jb or {}).get("boms", []):
                             boms_by_id[bom["bom_id"]] = bom
                 sitrep_data = _sitrep.build_sitrep(connexes, profile=None)
                 if boms_by_id:
