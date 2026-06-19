@@ -199,14 +199,6 @@ def draw_master_header(can, header, page_num, total_pages):
         can.setFont("Helvetica", 8)
         can.drawString(47, 58, str(header.typed_name)[:45])
 
-    # --- Battalion stamp (last — drawn on top of background, avoiding form data) ---
-    # Positioned in the upper-right corner of the form, inside the PAGE x OF y
-    # region but offset right so it doesn't collide with the pre-printed cells.
-    # The stamp is a bold italic text block rotated 15° for a "stencil" feel.
-    # It only renders when stamp_text is non-empty, so legacy flows are unaffected.
-    stamp = (getattr(header, "stamp_text", "") or "").strip().upper()
-    if stamp:
-        _draw_stamp(can, stamp)
 
 
 def _draw_stamp(can, stamp_text: str):

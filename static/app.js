@@ -1330,22 +1330,84 @@ function renderReviewSealStep(center, right) {
     </div>`;
 }
 
+/* Play the connex-closing seal animation as a full-screen overlay.
+ * Runs the API call concurrently — animation and download race in parallel. */
+function playSealAnimation(unitLabel) {
+  return new Promise(resolve => {
+    let overlay = document.getElementById("seal-overlay");
+    if (overlay) overlay.remove();  // always rebuild for clean state
+
+    overlay = document.createElement("div");
+    overlay.id = "seal-overlay";
+    overlay.innerHTML = `
+      <div class="seal-scene">
+        <div class="seal-connex">
+          <div class="seal-top"></div>
+          <div class="seal-side">
+            <span class="seal-side-star">&#9733;</span>
+            <div class="seal-side-badge">${esc(unitLabel || "108TH ADA BDE")}</div>
+          </div>
+          <div class="seal-front">
+            <div class="seal-front-ribs"></div>
+            <div class="seal-door-left"><div class="dl-bar"></div></div>
+            <div class="seal-door-right"><div class="dr-bar"></div></div>
+            <div class="seal-seam"></div>
+            <div class="seal-lock-bar"></div>
+            <div class="seal-stamp">SEALED</div>
+          </div>
+        </div>
+      </div>
+      <div class="seal-status-line">Generating DD1750s&hellip;</div>`;
+    document.body.appendChild(overlay);
+
+    const doorL  = overlay.querySelector(".seal-door-left");
+    const doorR  = overlay.querySelector(".seal-door-right");
+    const bar    = overlay.querySelector(".seal-lock-bar");
+    const stamp  = overlay.querySelector(".seal-stamp");
+    const star   = overlay.querySelector(".seal-side-star");
+    const badge  = overlay.querySelector(".seal-side-badge");
+    const status = overlay.querySelector(".seal-status-line");
+
+    // Fade in overlay, then sequence the connex closing
+    requestAnimationFrame(() => {
+      overlay.classList.add("seal-active");
+      setTimeout(() => doorL.classList.add("door-closed"),          350);
+      setTimeout(() => doorR.classList.add("door-closed"),          530);
+      setTimeout(() => { star.classList.add("visible"); badge.classList.add("visible"); }, 1100);
+      setTimeout(() => bar.classList.add("locked"),                 1350);
+      setTimeout(() => stamp.classList.add("visible"),              1950);
+      setTimeout(() => status.classList.add("visible"),             2150);
+      setTimeout(() => {
+        overlay.classList.remove("seal-active");
+        setTimeout(() => { overlay.remove(); resolve(); }, 380);
+      }, 3100);
+    });
+  });
+}
+
 window.applyStampAndGenerate = async function() {
   if (!STATE.connex) return;
-  const status = $("review-generate-status");
-  if (status) status.textContent = "Generating DD1750s…";
+  const uiStatus = $("review-generate-status");
+  if (uiStatus) uiStatus.textContent = "Sealing connex…";
 
-  try {
-    await api.download(
-      `/api/connex/${STATE.connex.connex_id}/generate`,
-      {},
-      `DD1750_${STATE.connex.connex_no || STATE.connex.connex_id}.zip`
-    );
-    if (status) status.textContent = "Downloaded. Connex complete.";
+  // Fire the API call immediately; show animation concurrently
+  let apiError = null;
+  const unitLabel = (STATE.profile && STATE.profile.stamp_text) || "108TH ADA BDE";
+  const apiCall = api.download(
+    `/api/connex/${STATE.connex.connex_id}/generate`,
+    {},
+    `DD1750_${STATE.connex.connex_no || STATE.connex.connex_id}.zip`
+  ).catch(e => { apiError = e; });
+
+  await playSealAnimation(unitLabel);
+  await apiCall;
+
+  if (apiError) {
+    showError("review-generate-error", "Generate failed: " + apiError.message);
+    if (uiStatus) uiStatus.textContent = "";
+  } else {
+    if (uiStatus) uiStatus.textContent = "Downloaded. Connex complete.";
     goTo("NEXT_SITREP");
-  } catch (e) {
-    showError("review-generate-error", "Generate failed: " + e.message);
-    if (status) status.textContent = "";
   }
 };
 
@@ -1644,21 +1706,29 @@ window.toggleHelp = function(triggerBtn) {
   });
   if (!isOpen) {
     popover.classList.add("cx-help__popover--open");
-    // Clamp to viewport so it never gets cut off
+    // position:fixed escapes overflow:hidden ancestors — compute from trigger's viewport rect
     requestAnimationFrame(() => {
-      const rect = popover.getBoundingClientRect();
-      if (rect.top < 8) {
-        // flip to below the trigger button
+      const tr   = triggerBtn.getBoundingClientRect();
+      const vw   = window.innerWidth;
+      const vh   = window.innerHeight;
+      const popW = 260;
+
+      let left = tr.left + tr.width / 2 - popW / 2;
+      if (left < 8)             left = 8;
+      if (left + popW > vw - 8) left = vw - popW - 8;
+
+      popover.style.position  = "fixed";
+      popover.style.width     = popW + "px";
+      popover.style.left      = left + "px";
+      popover.style.transform = "none";
+
+      // open above trigger by default; flip below when near top of viewport
+      if (tr.top > 160) {
+        popover.style.bottom = (vh - tr.top + 8) + "px";
+        popover.style.top    = "auto";
+      } else {
+        popover.style.top    = (tr.bottom + 8) + "px";
         popover.style.bottom = "auto";
-        popover.style.top    = "calc(100% + 8px)";
-      }
-      if (rect.left < 8) {
-        popover.style.left      = "0";
-        popover.style.transform = "none";
-      } else if (rect.right > window.innerWidth - 8) {
-        popover.style.left      = "auto";
-        popover.style.right     = "0";
-        popover.style.transform = "none";
       }
     });
     const close = (e) => {
