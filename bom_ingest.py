@@ -120,6 +120,9 @@ def ingest_bom(pdf_path: str, nomenclature: str = "") -> dict:
         "filename":      filename,
         "nomenclature":  nomenclature or stem,
         "model":         "",
+        # Authoritative end-item nomenclature read from the header DESC band
+        # (form-field BOMs only). Preferred over `model` for the nomenclature.
+        "header_desc":   "",
         "serial_number": "",
         "lin":           "",
         "end_item_niin": "",
@@ -169,44 +172,42 @@ def ingest_bom(pdf_path: str, nomenclature: str = "") -> dict:
         except Exception as exc:
             out["errors"].append(f"bom_parser extraction failed: {exc}")
 
-        # ── PHASE 1b: admin-header OCR recovery (form-field BOMs) ─────────────
-        # On these GCSS Component Listings the LIN and the end-item DESC
-        # (nomenclature) are printed in the header IMAGE, not in fillable fields
-        # — bom_parser can only recover NIIN (encoded in a field name) and the
-        # serial (the 'undefined' field). Without this, LIN comes back empty and
-        # the nomenclature falls back to the filename, so renaming the file
-        # breaks automated ingest. Pull LIN / DESC (and any still-missing
-        # NIIN / UIC / serial) straight from the header band by OCR. Guarded by
-        # OCR_AVAILABLE inside the call; a no-op when tesseract is absent.
-        #
-        # bom_parser falls back to the upload FILENAME for the description when
-        # it can't read the header (DESC is printed in the header image, not a
-        # field). Treat a filename-echo as "no content desc" so the OCR pass
-        # below supplies the real end-item nomenclature instead of the filename.
+        # bom_parser's `.desc` is NOT the end-item nomenclature: on these GCSS
+        # Component Listings it returns the equipment MODEL field (e.g. "KIV7M")
+        # or, when it can't read that, echoes the upload FILENAME. Keep it as the
+        # model, but treat a filename-echo as empty.
         if out["model"] and out["model"].strip().upper() == stem.strip().upper():
             out["model"] = ""
 
-        if not out["lin"] or not out["model"]:
-            try:
-                _hdr = extract_metadata_via_ocr_header(pdf_path, BomMetadata(
-                    end_item_niin=out["end_item_niin"],
-                    lin=out["lin"],
-                    serial_equip_no=out["serial_number"],
-                    end_item_description=out["model"],
-                    uic=out["uic"],
-                ))
-                if not out["lin"] and _hdr.lin:
-                    out["lin"] = _hdr.lin
-                if not out["model"] and _hdr.end_item_description:
-                    out["model"] = _hdr.end_item_description
-                if not out["end_item_niin"] and _hdr.end_item_niin:
-                    out["end_item_niin"] = _hdr.end_item_niin
-                if not out["uic"] and _hdr.uic:
-                    out["uic"] = _hdr.uic
-                if not out["serial_number"] and _hdr.serial_equip_no:
-                    out["serial_number"] = _hdr.serial_equip_no
-            except Exception as exc:
-                out["warnings"].append(f"admin-header OCR pass failed: {exc}")
+        # ── PHASE 1b: admin-header OCR recovery (form-field BOMs) ─────────────
+        # The authoritative end-item NOMENCLATURE (e.g. "ENCRYPTION-DECRYPTI") is
+        # printed in the header DESC band as an IMAGE, never in a fillable field.
+        # So we ALWAYS OCR the header here (forcing the DESC read by passing an
+        # empty description in) and store it as header_desc — otherwise the
+        # nomenclature wrongly falls back to bom_parser's model code or the
+        # filename. We also recover any ids bom_parser missed (the NIIN is never
+        # in a form field). Guarded by OCR_AVAILABLE inside the call; a no-op
+        # when tesseract is absent.
+        try:
+            _hdr = extract_metadata_via_ocr_header(pdf_path, BomMetadata(
+                end_item_niin=out["end_item_niin"],
+                lin=out["lin"],
+                serial_equip_no=out["serial_number"],
+                end_item_description="",   # force the header DESC band read
+                uic=out["uic"],
+            ))
+            if _hdr.end_item_description:
+                out["header_desc"] = _hdr.end_item_description
+            if not out["lin"] and _hdr.lin:
+                out["lin"] = _hdr.lin
+            if not out["end_item_niin"] and _hdr.end_item_niin:
+                out["end_item_niin"] = _hdr.end_item_niin
+            if not out["uic"] and _hdr.uic:
+                out["uic"] = _hdr.uic
+            if not out["serial_number"] and _hdr.serial_equip_no:
+                out["serial_number"] = _hdr.serial_equip_no
+        except Exception as exc:
+            out["warnings"].append(f"admin-header OCR pass failed: {exc}")
 
     else:
         # ── PHASE 1 (text PDF): v25 multi-format extractor ───────────────────
@@ -302,10 +303,13 @@ def ingest_bom(pdf_path: str, nomenclature: str = "") -> dict:
     # ── PHASE 3b: nomenclature label = end-item description, NOT the filename ──
     # The box rows and the Master 1750 show `nomenclature`. It was defaulting to
     # the upload filename stem, which is meaningless on the document. The real
-    # end-item nomenclature is the BOM admin-header "DESC:" field (e.g.
-    # "SATELLITE COMMUNICA"), which extraction stores in `model`. Prefer that;
-    # keep the filename stem only as a last resort when no description was found.
-    if out["model"]:
+    # end-item nomenclature is the BOM admin-header "DESC:" band (e.g.
+    # "SATELLITE COMMUNICA"). Prefer the OCR'd header_desc (form BOMs) or the
+    # text-extracted description in `model` (text BOMs); keep the filename stem
+    # only as a last resort when no description was found anywhere.
+    if out["header_desc"]:
+        out["nomenclature"] = out["header_desc"]
+    elif out["model"]:
         out["nomenclature"] = out["model"]
 
     # ── PHASE 4: zero-on-hand end-item placeholder ────────────────────────────
@@ -317,7 +321,7 @@ def ingest_bom(pdf_path: str, nomenclature: str = "") -> dict:
     # master row, and an individual 1750.  Tag it zero_on_hand so the UI flags it
     # for review and the user can exclude it before generating if it isn't present.
     if not out["items"]:
-        label = out["model"] or out["nomenclature"] or stem
+        label = out["nomenclature"] or out["model"] or stem
         out["items"] = [{
             "line_no":       1,
             "description":   label,

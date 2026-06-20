@@ -1,5 +1,5 @@
 {
-  "count": 768,
+  "count": 715,
   "formations": [
     {
       "file": "100th_Division.svg",
@@ -12,13 +12,6 @@
       "file": "100th_Missile_Defense_Brigade.jpg",
       "name": "100th Missile Defense Brigade",
       "echelon": "Brigade",
-      "insignia_type": "SSI",
-      "is_adata": false
-    },
-    {
-      "file": "101st_Airborne_Division.svg",
-      "name": "101st Airborne Division",
-      "echelon": "Division",
       "insignia_type": "SSI",
       "is_adata": false
     },
@@ -93,13 +86,6 @@
       "is_adata": false
     },
     {
-      "file": "102nd_Infantry_Division.svg",
-      "name": "102nd Infantry Division",
-      "echelon": "Division",
-      "insignia_type": "SSI",
-      "is_adata": false
-    },
-    {
       "file": "103d_Armored.jpeg",
       "name": "103d Armored",
       "echelon": "Regiment",
@@ -160,13 +146,6 @@
       "name": "104th Infantry",
       "echelon": "Regiment",
       "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
-      "file": "104th_Infantry_Division.svg",
-      "name": "104th Infantry Division",
-      "echelon": "Division",
-      "insignia_type": "SSI",
       "is_adata": false
     },
     {
@@ -940,13 +919,6 @@
       "is_adata": false
     },
     {
-      "file": "134th_Infantry.jpeg",
-      "name": "134th Infantry",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "136th_Infantry.jpg",
       "name": "136th Infantry",
       "echelon": "Regiment",
@@ -1129,13 +1101,6 @@
       "is_adata": false
     },
     {
-      "file": "145th_Infantry.jpg",
-      "name": "145th Infantry",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "146th_Field_Artillery.jpg",
       "name": "146th Field Artillery",
       "echelon": "Regiment",
@@ -1269,13 +1234,6 @@
       "is_adata": false
     },
     {
-      "file": "150th_Infantry.png",
-      "name": "150th Infantry",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "151st_Aviation.jpg",
       "name": "151st Aviation",
       "echelon": "Regiment",
@@ -1355,13 +1313,6 @@
     {
       "file": "157th_Field_Artillery.png",
       "name": "157th Field Artillery",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
-      "file": "157th_Infantry.png",
-      "name": "157th Infantry",
       "echelon": "Regiment",
       "insignia_type": "DUI",
       "is_adata": false
@@ -1745,13 +1696,6 @@
       "is_adata": false
     },
     {
-      "file": "180th_Infantry.jpeg",
-      "name": "180th Infantry",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "181st_Infantry.png",
       "name": "181st Infantry",
       "echelon": "Regiment",
@@ -1761,13 +1705,6 @@
     {
       "file": "182d_Infantry.jpg",
       "name": "182d Infantry",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
-      "file": "182nd_Infantry.jpg",
-      "name": "182nd Infantry",
       "echelon": "Regiment",
       "insignia_type": "DUI",
       "is_adata": false
@@ -1899,13 +1836,6 @@
       "is_adata": false
     },
     {
-      "file": "197th_Field_Artillery.jpg",
-      "name": "197th Field Artillery",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "198th_Signal_Battalion.png",
       "name": "198th Signal Battalion",
       "echelon": "Battalion",
@@ -1945,13 +1875,6 @@
       "name": "19th Infantry",
       "echelon": "Regiment",
       "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
-      "file": "19th_Special_Forces_Group_Airborne.png",
-      "name": "19th Special Forces Group Airborne",
-      "echelon": "Group",
-      "insignia_type": "SSI",
       "is_adata": false
     },
     {
@@ -2039,13 +1962,6 @@
       "is_adata": false
     },
     {
-      "file": "1st_Special_Forces_Group_Airborne.png",
-      "name": "1st Special Forces Group Airborne",
-      "echelon": "Group",
-      "insignia_type": "SSI",
-      "is_adata": false
-    },
-    {
       "file": "1st_Special_Forces_Regiment.png",
       "name": "1st Special Forces Regiment",
       "echelon": "Regiment",
@@ -2055,13 +1971,6 @@
     {
       "file": "200th_Coast_Artillery.png",
       "name": "200th Coast Artillery",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
-      "file": "200th_Infantry.png",
-      "name": "200th Infantry",
       "echelon": "Regiment",
       "insignia_type": "DUI",
       "is_adata": false
@@ -2081,25 +1990,11 @@
       "is_adata": false
     },
     {
-      "file": "201st_Infantry.jpg",
-      "name": "201st Infantry",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "202nd_Air_Defense_Artillery.png",
       "name": "202nd Air Defense Artillery",
       "echelon": "Regiment",
       "insignia_type": "DUI",
       "is_adata": true
-    },
-    {
-      "file": "202nd_Coast_Artillery.png",
-      "name": "202nd Coast Artillery",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
     },
     {
       "file": "203rd_Engineer_Battalion.png",
@@ -2137,13 +2032,6 @@
       "is_adata": false
     },
     {
-      "file": "206th_Field_Artillery.jpg",
-      "name": "206th Field Artillery",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "207th_Aviation.png",
       "name": "207th Aviation",
       "echelon": "Regiment",
@@ -2176,13 +2064,6 @@
       "name": "20th Infantry",
       "echelon": "Regiment",
       "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
-      "file": "20th_Special_Forces_Group_Airborne.png",
-      "name": "20th Special Forces Group Airborne",
-      "echelon": "Group",
-      "insignia_type": "SSI",
       "is_adata": false
     },
     {
@@ -2242,13 +2123,6 @@
       "is_adata": true
     },
     {
-      "file": "213th_Coast_Artillery.png",
-      "name": "213th Coast Artillery",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "214th_Aviation.png",
       "name": "214th Aviation",
       "echelon": "Regiment",
@@ -2258,13 +2132,6 @@
     {
       "file": "214th_Coast_Artillery.jpg",
       "name": "214th Coast Artillery",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
-      "file": "214th_Field_Artillery.jpg",
-      "name": "214th Field Artillery",
       "echelon": "Regiment",
       "insignia_type": "DUI",
       "is_adata": false
@@ -2286,13 +2153,6 @@
     {
       "file": "218th_Infantry.jpg",
       "name": "218th Infantry",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
-      "file": "220_Infantry.png",
-      "name": "220 Infantry",
       "echelon": "Regiment",
       "insignia_type": "DUI",
       "is_adata": false
@@ -2431,13 +2291,6 @@
       "is_adata": false
     },
     {
-      "file": "244th_Coast_Artillery.png",
-      "name": "244th Coast Artillery",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "244th_Expeditionary_Combat_Aviation_Brigade_USAR.jpg",
       "name": "244th Expeditionary Combat Aviation Brigade USAR",
       "echelon": "Brigade",
@@ -2499,13 +2352,6 @@
       "echelon": "Regiment",
       "insignia_type": "DUI",
       "is_adata": true
-    },
-    {
-      "file": "251st_Coast_Artillery.png",
-      "name": "251st Coast Artillery",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
     },
     {
       "file": "252nd_Armored.png",
@@ -2711,13 +2557,6 @@
       "is_adata": false
     },
     {
-      "file": "299th_Infantry.jpg",
-      "name": "299th Infantry",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "29th_Field_Artillery.jpg",
       "name": "29th Field Artillery",
       "echelon": "Regiment",
@@ -2784,13 +2623,6 @@
       "file": "2nd_Chemical_Battalion.png",
       "name": "2nd Chemical Battalion",
       "echelon": "Battalion",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
-      "file": "2nd_Coast_Artillery.png",
-      "name": "2nd Coast Artillery",
-      "echelon": "Regiment",
       "insignia_type": "DUI",
       "is_adata": false
     },
@@ -3334,13 +3166,6 @@
       "is_adata": false
     },
     {
-      "file": "355th_Regiment.png",
-      "name": "355th Regiment",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "358th_Regiment.png",
       "name": "358th Regiment",
       "echelon": "Regiment",
@@ -3460,13 +3285,6 @@
       "is_adata": false
     },
     {
-      "file": "378th_Infantry_Regiment.png",
-      "name": "378th Infantry Regiment",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "379th_Infantry.jpg",
       "name": "379th Infantry",
       "echelon": "Regiment",
@@ -3516,13 +3334,6 @@
       "is_adata": false
     },
     {
-      "file": "382nd_Regiment.png",
-      "name": "382nd Regiment",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "385th_Infantry.png",
       "name": "385th Infantry",
       "echelon": "Regiment",
@@ -3567,13 +3378,6 @@
     {
       "file": "395th_Infantry.png",
       "name": "395th Infantry",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
-      "file": "395th_Regiment.png",
-      "name": "395th Regiment",
       "echelon": "Regiment",
       "insignia_type": "DUI",
       "is_adata": false
@@ -3660,13 +3464,6 @@
       "name": "3rd Infantry Regiment",
       "echelon": "Regiment",
       "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
-      "file": "3rd_Special_Forces_Group_Airborne.png",
-      "name": "3rd Special Forces Group Airborne",
-      "echelon": "Group",
-      "insignia_type": "SSI",
       "is_adata": false
     },
     {
@@ -3780,13 +3577,6 @@
       "echelon": "Regiment",
       "insignia_type": "DUI",
       "is_adata": true
-    },
-    {
-      "file": "43rd_Engineer_Battalion.svg",
-      "name": "43rd Engineer Battalion",
-      "echelon": "Battalion",
-      "insignia_type": "DUI",
-      "is_adata": false
     },
     {
       "file": "43rd_Infantry.png",
@@ -3992,13 +3782,6 @@
       "is_adata": false
     },
     {
-      "file": "513th_Infantry.svg",
-      "name": "513th Infantry",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "516th_Infantry.png",
       "name": "516th Infantry",
       "echelon": "Regiment",
@@ -4090,13 +3873,6 @@
       "is_adata": false
     },
     {
-      "file": "52nd_Coast_Artillery.png",
-      "name": "52nd Coast Artillery",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "52nd_Infantry.jpg",
       "name": "52nd Infantry",
       "echelon": "Regiment",
@@ -4120,20 +3896,6 @@
     {
       "file": "53rd_Infantry.jpg",
       "name": "53rd Infantry",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
-      "file": "541st_Infantry.svg",
-      "name": "541st Infantry",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
-      "file": "542nd_Infantry.svg",
-      "name": "542nd Infantry",
       "echelon": "Regiment",
       "insignia_type": "DUI",
       "is_adata": false
@@ -4186,13 +3948,6 @@
       "echelon": "Regiment",
       "insignia_type": "DUI",
       "is_adata": true
-    },
-    {
-      "file": "56th_Coast_Artillery.jpg",
-      "name": "56th Coast Artillery",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
     },
     {
       "file": "56th_Theater_Information_Operations_Group.jpg",
@@ -4251,13 +4006,6 @@
       "is_adata": false
     },
     {
-      "file": "5th_Coast_Artillery.png",
-      "name": "5th Coast Artillery",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "5th_Field_Artillery.jpg",
       "name": "5th Field Artillery",
       "echelon": "Regiment",
@@ -4279,25 +4027,11 @@
       "is_adata": false
     },
     {
-      "file": "5th_Special_Forces_Group_Airborne.png",
-      "name": "5th Special Forces Group Airborne",
-      "echelon": "Group",
-      "insignia_type": "SSI",
-      "is_adata": false
-    },
-    {
       "file": "60th_Air_Defense_Artillery.png",
       "name": "60th Air Defense Artillery",
       "echelon": "Regiment",
       "insignia_type": "DUI",
       "is_adata": true
-    },
-    {
-      "file": "60th_Coast_Artillery.png",
-      "name": "60th Coast Artillery",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
     },
     {
       "file": "60th_Infantry.png",
@@ -4325,13 +4059,6 @@
       "name": "61st Cavalry Division",
       "echelon": "Division",
       "insignia_type": "SSI",
-      "is_adata": false
-    },
-    {
-      "file": "61st_Coast_Artillery.png",
-      "name": "61st Coast Artillery",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
       "is_adata": false
     },
     {
@@ -4440,13 +4167,6 @@
       "is_adata": false
     },
     {
-      "file": "65th_Coast_Artillery.jpg",
-      "name": "65th Coast Artillery",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "65th_Engineer_Battalion.jpeg",
       "name": "65th Engineer Battalion",
       "echelon": "Battalion",
@@ -4482,13 +4202,6 @@
       "is_adata": false
     },
     {
-      "file": "66th_Infantry.png",
-      "name": "66th Infantry",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "66th_Infantry_Division.jpg",
       "name": "66th Infantry Division",
       "echelon": "Division",
@@ -4510,22 +4223,8 @@
       "is_adata": false
     },
     {
-      "file": "67th_Infantry.jpg",
-      "name": "67th Infantry",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "68th_Armor.jpeg",
       "name": "68th Armor",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
-      "file": "68th_Armored.jpeg",
-      "name": "68th Armored",
       "echelon": "Regiment",
       "insignia_type": "DUI",
       "is_adata": false
@@ -4741,13 +4440,6 @@
       "is_adata": false
     },
     {
-      "file": "78th_Infantry_Division.svg",
-      "name": "78th Infantry Division",
-      "echelon": "Division",
-      "insignia_type": "SSI",
-      "is_adata": false
-    },
-    {
       "file": "78th_Training_Division.svg",
       "name": "78th Training Division",
       "echelon": "Division",
@@ -4790,13 +4482,6 @@
       "is_adata": false
     },
     {
-      "file": "7th_Coast_Artillery.jpg",
-      "name": "7th Coast Artillery",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "7th_Engineer_Battalion.jpeg",
       "name": "7th Engineer Battalion",
       "echelon": "Battalion",
@@ -4828,13 +4513,6 @@
       "file": "7th_Infantry_Division.svg",
       "name": "7th Infantry Division",
       "echelon": "Division",
-      "insignia_type": "SSI",
-      "is_adata": false
-    },
-    {
-      "file": "7th_Special_Forces_Group_Airborne.png",
-      "name": "7th Special Forces Group Airborne",
-      "echelon": "Group",
       "insignia_type": "SSI",
       "is_adata": false
     },
@@ -4972,13 +4650,6 @@
       "is_adata": false
     },
     {
-      "file": "86th_Infantry_Division.svg",
-      "name": "86th Infantry Division",
-      "echelon": "Division",
-      "insignia_type": "SSI",
-      "is_adata": false
-    },
-    {
       "file": "86th_Training_Division.svg",
       "name": "86th Training Division",
       "echelon": "Division",
@@ -5000,13 +4671,6 @@
       "is_adata": false
     },
     {
-      "file": "87th_Infantry_Division.svg",
-      "name": "87th Infantry Division",
-      "echelon": "Division",
-      "insignia_type": "SSI",
-      "is_adata": false
-    },
-    {
       "file": "87th_Training_Division.svg",
       "name": "87th Training Division",
       "echelon": "Division",
@@ -5018,13 +4682,6 @@
       "name": "88th Infantry",
       "echelon": "Regiment",
       "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
-      "file": "88th_Infantry_Division.svg",
-      "name": "88th Infantry Division",
-      "echelon": "Division",
-      "insignia_type": "SSI",
       "is_adata": false
     },
     {
@@ -5133,13 +4790,6 @@
       "is_adata": false
     },
     {
-      "file": "91st_Infantry_Division.svg",
-      "name": "91st Infantry Division",
-      "echelon": "Division",
-      "insignia_type": "SSI",
-      "is_adata": false
-    },
-    {
       "file": "92nd_Coast_Artillery.png",
       "name": "92nd Coast Artillery",
       "echelon": "Regiment",
@@ -5175,13 +4825,6 @@
       "is_adata": false
     },
     {
-      "file": "94th_Cavalry.png",
-      "name": "94th Cavalry",
-      "echelon": "Regiment",
-      "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
       "file": "94th_Division.svg",
       "name": "94th Division",
       "echelon": "Division",
@@ -5198,13 +4841,6 @@
     {
       "file": "95th_Division.svg",
       "name": "95th Division",
-      "echelon": "Division",
-      "insignia_type": "SSI",
-      "is_adata": false
-    },
-    {
-      "file": "95th_Infantry_Division.svg",
-      "name": "95th Infantry Division",
       "echelon": "Division",
       "insignia_type": "SSI",
       "is_adata": false
@@ -5256,13 +4892,6 @@
       "name": "98th Civil Affairs Battalion",
       "echelon": "Battalion",
       "insignia_type": "DUI",
-      "is_adata": false
-    },
-    {
-      "file": "98th_Infantry_Division.svg",
-      "name": "98th Infantry Division",
-      "echelon": "Division",
-      "insignia_type": "SSI",
       "is_adata": false
     },
     {

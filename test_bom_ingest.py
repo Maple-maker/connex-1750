@@ -184,6 +184,34 @@ def test_lin_leading_glyph_reocr_from_content():
           f"(lin={r['lin']} nomen={r['nomenclature']!r})")
 
 
+def test_nomenclature_prefers_header_desc_over_model_code():
+    """Form BOM where bom_parser's field is the MODEL code (e.g. 'KIV7M'), not
+    the nomenclature. The nomenclature must come from the header DESC band
+    ('ENCRYPTION-DECRYPTI'), with the model code preserved separately. Reference:
+    '0046617 KIV7M E05003 ENCRYPTION-DECRYPTI.pdf'."""
+    if not _tesseract_runnable():
+        print("SKIP  test_nomenclature_prefers_header_desc_over_model_code (tesseract binary not on PATH)")
+        return
+
+    src = (
+        "/Users/jaidenrabatin/Desktop/AEGIS/30-PROJECTS/active/1750_bulk_editor/"
+        "CONNEX_1750_AGENT_STARTER/FC BOMS/0046617 KIV7M E05003 ENCRYPTION-DECRYPTI.pdf"
+    )
+    if not os.path.exists(src):
+        print(f"SKIP  test_nomenclature_prefers_header_desc_over_model_code (fixture missing)")
+        return
+
+    r = ingest_bom(src, nomenclature="0046617 KIV7M E05003 ENCRYPTION-DECRYPTI")
+    assert r["nomenclature"].upper().startswith("ENCRYPTION-DECRYPTI"), \
+        f"nomenclature took the model code, not the header DESC: {r['nomenclature']!r}"
+    assert r["nomenclature"].upper() != "KIV7M", "nomenclature is the model code KIV7M!"
+    assert r["model"] == "KIV7M", f"model code not preserved: {r['model']!r}"
+    assert r["lin"] == "E05003", f"LIN: {r['lin']!r}"
+    assert r["end_item_niin"] == "015302811", f"NIIN not recovered from header: {r['end_item_niin']!r}"
+    print("PASS  test_nomenclature_prefers_header_desc_over_model_code "
+          f"(nomen={r['nomenclature']!r} model={r['model']!r})")
+
+
 def _run_issue4_regression():
     print(f"\n{'='*70}")
     print(f"Issue 4 regression  (OCR_AVAILABLE={OCR_AVAILABLE}, "
@@ -195,6 +223,7 @@ def _run_issue4_regression():
     test_golden_bom_niin_from_content_when_renamed()
     test_form_bom_lin_and_nomenclature_from_content_when_renamed()
     test_lin_leading_glyph_reocr_from_content()
+    test_nomenclature_prefers_header_desc_over_model_code()
 
 TEST_BOMS = [
     (

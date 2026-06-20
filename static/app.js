@@ -20,11 +20,10 @@ let STATE = {
   step: "PROFILE",
   profile: null,
   formations: [],
-  // Insignia cascade selections (Division → Brigade → Battalion DUI).
+  // Insignia cascade selections (Division → Brigade).
   _currentTier: "division",
   selectedDivision: null,      // SSI patch (echelon Division)
   selectedBrigade: null,       // SSI patch (echelon Brigade) — the unit identity
-  selectedBattalionDUI: null,  // DUI patch (echelon Regiment/Battalion)
   selectedFormation: null,     // legacy alias kept in sync with selectedBrigade
   connex: null,
   job_id: null,
@@ -49,16 +48,13 @@ const STEP_LABELS = {
 
 /* =========================================================
  * INSIGNIA CASCADE — tier config + badges
- * Three echelon tiers feed the profile gallery. The patch manifest carries no
+ * Two echelon tiers feed the profile gallery. The patch manifest carries no
  * parent→child linkage, so each tier is an independent picker; the breadcrumb
  * concatenates whatever was chosen at each level (not a filtered drill-down).
  * ========================================================= */
 const TIERS = {
-  division:  { label: "Division",  echelons: ["Division"],                        defType: "SSI" },
-  brigade:   { label: "Brigade",   echelons: ["Brigade"],                         defType: "SSI" },
-  // "Other" folds the handful of motto/camp DUIs into the battalion tier so no
-  // manifest entry is orphaned out of every picker.
-  battalion: { label: "Battalion", echelons: ["Regiment", "Battalion", "Other"], defType: "DUI" },
+  division:  { label: "Division",  echelons: ["Division"],  defType: "SSI" },
+  brigade:   { label: "Brigade",   echelons: ["Brigade"],   defType: "SSI" },
 };
 
 // SSI = shoulder sleeve insignia (blue badge); DUI = distinctive unit insignia
@@ -290,12 +286,11 @@ function renderProfileStep(center, right) {
 
     <div class="cx-panel" id="profile-gallery-panel">
       <h2 class="cx-panel__title">1 &middot; Select Your Unit Insignia</h2>
-      <p class="cx-field-hint">Work down the echelons: Division → Brigade → Battalion. Brigade is required; the others are optional.</p>
+      <p class="cx-field-hint">Choose your Division, then your Brigade. Brigade is required; Division is optional.</p>
 
       <div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-3);">
-        <button type="button" class="cx-3tier-tab cx-3tier-tab--active" data-tier="division"  onclick="switchTier('division')">Division</button>
-        <button type="button" class="cx-3tier-tab"                       data-tier="brigade"   onclick="switchTier('brigade')">Brigade</button>
-        <button type="button" class="cx-3tier-tab"                       data-tier="battalion" onclick="switchTier('battalion')">Battalion</button>
+        <button type="button" class="cx-3tier-tab cx-3tier-tab--active" data-tier="division" onclick="switchTier('division')">Division</button>
+        <button type="button" class="cx-3tier-tab"                       data-tier="brigade"  onclick="switchTier('brigade')">Brigade</button>
       </div>
 
       <div id="cascade-breadcrumb" style="display:flex;align-items:center;flex-wrap:wrap;gap:var(--space-2);margin-bottom:var(--space-3);min-height:1.4em;"></div>
@@ -428,7 +423,6 @@ window.resumeSavedProfile = async function(profileId) {
     STATE.selectedBrigade      = lookup(p.brigade_image, p.brigade);
     STATE.selectedFormation    = STATE.selectedBrigade;   // legacy alias
     STATE.selectedDivision     = lookup(p.division_image, p.division);
-    STATE.selectedBattalionDUI = lookup(p.battalion_image, "");
     renderBanner();
     goTo("CONNEX_SETUP");
   } catch (e) {
@@ -443,9 +437,7 @@ window.dismissResumeCard = function() {
 
 // Selection slot for a given tier.
 function tierSelection(tier) {
-  return tier === "division" ? STATE.selectedDivision
-       : tier === "battalion" ? STATE.selectedBattalionDUI
-       : STATE.selectedBrigade;
+  return tier === "division" ? STATE.selectedDivision : STATE.selectedBrigade;
 }
 
 // Switch the active echelon tier: update tab styling, reset the insignia-type
@@ -477,7 +469,6 @@ function renderBreadcrumb() {
   el.innerHTML = [
     seg(STATE.selectedDivision, "Division —"),
     seg(STATE.selectedBrigade, "Brigade —"),
-    seg(STATE.selectedBattalionDUI, "Battalion —"),
   ].join(`<span style="opacity:.5;">&rsaquo;</span>`);
 }
 
@@ -552,16 +543,13 @@ window.selectFormation = function(file) {
   if (tier === "division") {
     STATE.selectedDivision = formation;
     switchTier("brigade");
-  } else if (tier === "brigade") {
+  } else {
     STATE.selectedBrigade   = formation;
     STATE.selectedFormation = formation;   // legacy alias
     showDetailPanel(formation);
-    switchTier("battalion");
+    renderCascade();
     const panel = $("profile-detail-panel");
     panel && panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  } else {
-    STATE.selectedBattalionDUI = formation;
-    renderCascade();
   }
   renderBanner();
 };
@@ -570,7 +558,6 @@ window.selectFormation = function(file) {
 window.resetCascade = function() {
   STATE.selectedDivision     = null;
   STATE.selectedBrigade      = null;
-  STATE.selectedBattalionDUI = null;
   STATE.selectedFormation    = null;
   const panel = $("profile-detail-panel");
   if (panel) panel.style.display = "none";
@@ -586,7 +573,6 @@ window.saveProfile = async function() {
   const brigade_image   = STATE.selectedBrigade.file;
   const division        = STATE.selectedDivision ? STATE.selectedDivision.name : "";
   const division_image  = STATE.selectedDivision ? STATE.selectedDivision.file : "";
-  const battalion_image = STATE.selectedBattalionDUI ? STATE.selectedBattalionDUI.file : "";
   const battalion     = ($("p_battalion") || {}).value || "";
   const battery       = ($("p_battery")   || {}).value || "";
   const uic           = ($("p_uic")       || {}).value || "";
@@ -597,7 +583,7 @@ window.saveProfile = async function() {
   try {
     const data = await api.post("/api/profiles", {
       brigade, brigade_image, battalion, battery, uic,
-      division, division_image, battalion_image,
+      division, division_image, battalion_image: "",
       default_packed_by: packed_by,
       default_shrh_poc:  shrh_poc,
       stamp_text,
