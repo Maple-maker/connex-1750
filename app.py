@@ -1289,7 +1289,7 @@ def _connex_pdfs_into_zip(connex_id: str, zf: "zipfile.ZipFile", folder: str, tm
     profile = _profiles.load_profile(connex.get("profile_id", "")) or {}
 
     # Build master rows from both BOM and individual-item sources.
-    master_rows = packing.boxes_to_master_rows(boms, box_map) if boms and box_map else []
+    master_rows = packing.boxes_to_itemized_master_rows(boms, box_map) if boms and box_map else []
     for box in connex.get("boxes", []):
         box_num = box["box_num"]
         for item in box.get("individual_items", []):
@@ -1306,7 +1306,7 @@ def _connex_pdfs_into_zip(connex_id: str, zf: "zipfile.ZipFile", folder: str, tm
             })
 
     if master_rows:
-        condensed        = master_core.condense_master_rows(master_rows)
+        condensed        = master_core.finalize_master_rows(master_rows)
         master_bom_items = master_core.rows_to_bom_items(condensed)
         master_mei       = sum(_box_major_end_items(b) for b in connex.get("boxes", []))
         master_hdr       = render_core.build_connex_header(
@@ -1417,7 +1417,7 @@ def api_generate_connex(connex_id):
             # ----------------------------------------------------------------
 
             # BOM-sourced master rows (packing engine, same as /generate-master).
-            master_rows = packing.boxes_to_master_rows(boms, box_map) if boms and box_map else []
+            master_rows = packing.boxes_to_itemized_master_rows(boms, box_map) if boms and box_map else []
 
             # Synthetic master rows for individual_items.  One row per non-blank
             # item, keyed to its box_num so the BOX NO. column is populated.
@@ -1437,8 +1437,9 @@ def api_generate_connex(connex_id):
                     })
 
             if master_rows:
-                # condense collapses identical end-items across boxes; re-sequences 1..N.
-                condensed = master_core.condense_master_rows(master_rows)
+                # finalize keeps each item's real box number and lists one row
+                # per end item (merging only identical items within the same box).
+                condensed = master_core.finalize_master_rows(master_rows)
                 master_bom_items = master_core.rows_to_bom_items(condensed)
 
                 # Use a synthetic "all-boxes" header: sloc/shrh blank on the master
@@ -1712,7 +1713,7 @@ def api_session_packet():
             box_map = job["box_map"] if job else {}
             profile = _profiles.load_profile(cx.get("profile_id", "")) or {}
 
-            master_rows = packing.boxes_to_master_rows(boms, box_map) if boms and box_map else []
+            master_rows = packing.boxes_to_itemized_master_rows(boms, box_map) if boms and box_map else []
             for box in cx.get("boxes", []):
                 for item in box.get("individual_items", []):
                     desc = (item.get("description") or "").strip()
@@ -1730,7 +1731,7 @@ def api_session_packet():
             if not master_rows:
                 continue
 
-            condensed        = master_core.condense_master_rows(master_rows)
+            condensed        = master_core.finalize_master_rows(master_rows)
             master_bom_items = master_core.rows_to_bom_items(condensed)
             master_hdr       = render_core.build_connex_header(
                 cx, {}, cx.get("box_count", 1), "ALL", profile or None, include_seal=True,

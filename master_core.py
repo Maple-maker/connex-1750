@@ -456,6 +456,55 @@ def build_master_header(header: Dict[str, Any], rows: List[Dict[str, Any]]):
 # Master row condensing — collapse same-model end items into one row
 # ---------------------------------------------------------------------------
 
+def finalize_master_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Prepare master rows for rendering while KEEPING each item's real box number.
+
+    Unlike condense_master_rows (which merges identical end items ACROSS boxes
+    and re-sequences box numbers 1..N), this:
+      * groups only WITHIN a box (same box_num + normalized model + LIN), so
+        identical items in one box collapse to a single row with summed qty and
+        merged serials — counts stay accurate;
+      * preserves the actual box_num so the BOX NO. column reflects the box each
+        item is physically assigned to (two boxes → only 1 and 2 appear);
+      * sorts rows by box_num so items group visually under their box.
+
+    Different end items in the same box stay on separate rows (one line each),
+    making the master 1750 readable item-by-item.
+    """
+    from collections import OrderedDict
+    groups: "OrderedDict[tuple, Dict[str, Any]]" = OrderedDict()
+
+    for r in rows:
+        box_num = int(r.get("box_num", 0) or 0)
+        key = (
+            box_num,
+            normalize_model(str(r.get("model", "") or "")),
+            str(r.get("lin", "") or "").strip().upper(),
+        )
+        if key not in groups:
+            groups[key] = {
+                "box_num": box_num,
+                "model":   key[1],
+                "lin":     key[2],
+                "nsn":     str(r.get("nsn", "") or "").strip(),
+                "serials": [],
+                "qty":     0,
+            }
+        g = groups[key]
+        raw_serials = r.get("serials", [])
+        if isinstance(raw_serials, str):
+            raw_serials = [s.strip() for s in raw_serials.split(",") if s.strip()]
+        for sn in raw_serials:
+            if sn and sn not in g["serials"]:
+                g["serials"].append(sn)
+        if not g["nsn"]:
+            g["nsn"] = str(r.get("nsn", "") or "").strip()
+        g["qty"] += int(r.get("qty", 1) or 1)
+
+    return sorted(groups.values(), key=lambda g: g["box_num"])
+
+
 def condense_master_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Collapse rows that represent the same end item (same LIN + normalized model)
@@ -771,6 +820,6 @@ def audit_master(rows: List[Dict[str, Any]], header: Dict[str, Any],
 __all__ = [
     "ParsedMEI", "MasterRow",
     "parse_filename", "sniff_nsn", "normalize_model",
-    "aggregate_meis", "condense_master_rows", "build_master_header",
+    "aggregate_meis", "condense_master_rows", "finalize_master_rows", "build_master_header",
     "rows_to_bom_items", "audit_master",
 ]

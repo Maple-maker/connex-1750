@@ -238,6 +238,84 @@ def items_for_box(boms: list[dict], box_map: dict, box_num: int) -> list[dict]:
     return result
 
 
+def _collect_box_to_boms(boms: list[dict], box_map: dict) -> dict[int, list[dict]]:
+    """
+    Map each occupied box_num -> the BOMs (end items) with ≥1 item in that box.
+
+    BOMs are listed in boms-order and de-duped per box (a BOM appears once per
+    box even if several of its components land there).
+    """
+    box_to_boms: dict[int, list[dict]] = {}
+    box_to_bom_ids_seen: dict[int, set[str]] = {}
+
+    for bom in boms:
+        bom_id = bom["bom_id"]
+        for item in bom.get("items", []):
+            key = item_key(bom_id, item["line_no"])
+            box_num = box_map.get(key)
+            if box_num is None:
+                continue  # item not assigned to any box (shouldn't happen in practice)
+            if box_num not in box_to_boms:
+                box_to_boms[box_num] = []
+                box_to_bom_ids_seen[box_num] = set()
+            if bom_id not in box_to_bom_ids_seen[box_num]:
+                box_to_boms[box_num].append(bom)
+                box_to_bom_ids_seen[box_num].add(bom_id)
+
+    return box_to_boms
+
+
+def boxes_to_itemized_master_rows(boms: list[dict], box_map: dict) -> list[dict]:
+    """
+    Build ONE master row per END ITEM per box — NOT one combined row per box.
+
+    Unlike boxes_to_master_rows (which "; "-joins every end item in a box into a
+    single row), this emits a separate row for each distinct end item so the
+    master 1750 shows one line per item. Each row keeps the ACTUAL box_num of
+    the box the item is in, so the BOX NO. column reflects real assignments
+    (two boxes → only 1 and 2 ever appear, even with many items).
+
+    Identical end items in the SAME box (same nomenclature + LIN, e.g. 50 M4s)
+    merge into one row with qty = count and all serials collected, so counts
+    stay accurate. The same end item split across different boxes yields one row
+    per box, each labeled with that box's number.
+
+    Rows are returned sorted by box_num. Shape matches
+    master_core.rows_to_bom_items().
+    """
+    box_to_boms = _collect_box_to_boms(boms, box_map)
+
+    rows: list[dict] = []
+    for box_num in sorted(box_to_boms.keys()):
+        # Group this box's end items by identity (label + LIN), preserving order.
+        groups: dict[tuple, dict] = {}
+        order: list[tuple] = []
+        for bom in box_to_boms[box_num]:
+            label = (bom.get("nomenclature") or bom.get("model") or "").strip()
+            lin   = (bom.get("lin") or "").strip()
+            key   = (label.upper(), lin.upper())
+            if key not in groups:
+                groups[key] = {
+                    "box_num": box_num,
+                    "model":   label,
+                    "lin":     lin,
+                    "nsn":     (bom.get("end_item_niin") or "").strip(),
+                    "serials": [],
+                    "qty":     0,
+                }
+                order.append(key)
+            g = groups[key]
+            g["qty"] += 1
+            sn = (bom.get("serial_number") or "").strip()
+            if sn and sn not in g["serials"]:
+                g["serials"].append(sn)
+            if not g["nsn"]:
+                g["nsn"] = (bom.get("end_item_niin") or "").strip()
+        rows.extend(groups[k] for k in order)
+
+    return rows
+
+
 def boxes_to_master_rows(boms: list[dict], box_map: dict) -> list[dict]:
     """
     Build one master-row dict per occupied box, sorted by box_num.
@@ -266,25 +344,7 @@ def boxes_to_master_rows(boms: list[dict], box_map: dict) -> list[dict]:
     Returns:
         List of row dicts sorted by box_num ascending.
     """
-    # Collect which BOMs contribute to each occupied box.
-    # box_to_boms: box_num -> list of bom dicts, in boms-order, de-duped.
-    # We use a set of bom_ids to track duplicates but preserve order.
-    box_to_boms: dict[int, list[dict]] = {}
-    box_to_bom_ids_seen: dict[int, set[str]] = {}
-
-    for bom in boms:
-        bom_id = bom["bom_id"]
-        for item in bom.get("items", []):
-            key = item_key(bom_id, item["line_no"])
-            box_num = box_map.get(key)
-            if box_num is None:
-                continue  # item not assigned to any box (shouldn't happen in practice)
-            if box_num not in box_to_boms:
-                box_to_boms[box_num] = []
-                box_to_bom_ids_seen[box_num] = set()
-            if bom_id not in box_to_bom_ids_seen[box_num]:
-                box_to_boms[box_num].append(bom)
-                box_to_bom_ids_seen[box_num].add(bom_id)
+    box_to_boms = _collect_box_to_boms(boms, box_map)
 
     rows: list[dict] = []
     for box_num in sorted(box_to_boms.keys()):
@@ -374,5 +434,6 @@ __all__ = [
     "occupied_boxes",
     "items_for_box",
     "boxes_to_master_rows",
+    "boxes_to_itemized_master_rows",
     "condense_items",
 ]

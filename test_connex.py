@@ -17,6 +17,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 _tmp_data_dir = tempfile.mkdtemp()
 
 import connex_store
+import packing
+import master_core
 
 _orig_dir = connex_store.CONNEXES_DIR
 connex_store.CONNEXES_DIR = os.path.join(_tmp_data_dir, "connexes")
@@ -835,6 +837,65 @@ class TestMajorEndItemsHeader(unittest.TestCase):
         }
         hdr = render_core.build_connex_header(connex, {"box_num": 1}, 5, "1", None)
         self.assertIn("MAJOR END ITEMS: (5)", hdr.end_item)
+
+
+class TestItemizedMasterRows(unittest.TestCase):
+    """
+    The connex master 1750 lists ONE row per end item and keeps each item's
+    real box number (packing.boxes_to_itemized_master_rows +
+    master_core.finalize_master_rows). Two boxes must never produce a box
+    number of 3, and multiple end items in a box must each get their own line.
+    """
+
+    def _boms_two_boxes(self):
+        # Box 1: two different end items. Box 2: two different end items.
+        boms = [
+            {"bom_id": "b1", "nomenclature": "TRK CG LWB", "model": "",
+             "lin": "T62112", "end_item_niin": "015527780",
+             "serial_number": "J-K900200A-DY", "items": [{"line_no": 1}]},
+            {"bom_id": "b2", "nomenclature": "RADAR SET", "model": "",
+             "lin": "R05043", "end_item_niin": "016229674",
+             "serial_number": "605135", "items": [{"line_no": 1}]},
+            {"bom_id": "b3", "nomenclature": "ENCRYPTION-DECRYPTI", "model": "",
+             "lin": "E05003", "end_item_niin": "015302811",
+             "serial_number": "0041403", "items": [{"line_no": 1}]},
+            {"bom_id": "b4", "nomenclature": "TEST SET", "model": "",
+             "lin": "", "end_item_niin": "", "serial_number": "MSD-V3-000535",
+             "items": [{"line_no": 1}]},
+        ]
+        box_map = {"b1:1": 1, "b2:1": 1, "b3:1": 2, "b4:1": 2}
+        return boms, box_map
+
+    def test_one_row_per_end_item(self):
+        boms, box_map = self._boms_two_boxes()
+        rows = packing.boxes_to_itemized_master_rows(boms, box_map)
+        rows = master_core.finalize_master_rows(rows)
+        self.assertEqual(len(rows), 4)  # not "; "-joined into 2
+
+    def test_box_numbers_reflect_real_boxes(self):
+        boms, box_map = self._boms_two_boxes()
+        rows = master_core.finalize_master_rows(
+            packing.boxes_to_itemized_master_rows(boms, box_map))
+        box_nums = [r["box_num"] for r in rows]
+        self.assertEqual(box_nums, [1, 1, 2, 2])     # sorted, real boxes
+        self.assertEqual(max(box_nums), 2)           # never re-sequenced to 3
+
+    def test_identical_items_merge_within_box_split_across(self):
+        # 3 identical M4s in box 1, 2 in box 2 → one row per box, qty 3 / 2.
+        boms = [
+            {"bom_id": f"m{i}", "nomenclature": "RIFLE M4", "model": "",
+             "lin": "A12345", "end_item_niin": "010101010",
+             "serial_number": f"SN{i}", "items": [{"line_no": 1}]}
+            for i in range(5)
+        ]
+        box_map = {"m0:1": 1, "m1:1": 1, "m2:1": 1, "m3:1": 2, "m4:1": 2}
+        rows = master_core.finalize_master_rows(
+            packing.boxes_to_itemized_master_rows(boms, box_map))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["box_num"], 1)
+        self.assertEqual(rows[0]["qty"], 3)
+        self.assertEqual(rows[1]["box_num"], 2)
+        self.assertEqual(rows[1]["qty"], 2)
 
 
 if __name__ == "__main__":
