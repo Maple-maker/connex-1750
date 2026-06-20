@@ -1447,83 +1447,27 @@ function renderReviewSealStep(center, right) {
 
 /* Play the connex-closing seal animation as a full-screen overlay.
  * Runs the API call concurrently — animation and download race in parallel. */
-function playSealAnimation(unitLabel) {
-  return new Promise(resolve => {
-    let overlay = document.getElementById("seal-overlay");
-    if (overlay) overlay.remove();  // always rebuild for clean state
-
-    overlay = document.createElement("div");
-    overlay.id = "seal-overlay";
-    overlay.innerHTML = `
-      <div class="seal-scene">
-        <div class="seal-connex">
-          <div class="seal-top"></div>
-          <div class="seal-side">
-            <span class="seal-side-star">&#9733;</span>
-            <div class="seal-side-badge">${esc(unitLabel || "108TH ADA BDE")}</div>
-          </div>
-          <div class="seal-front">
-            <div class="seal-front-ribs"></div>
-            <div class="seal-door-left"><div class="dl-bar"></div></div>
-            <div class="seal-door-right"><div class="dr-bar"></div></div>
-            <div class="seal-seam"></div>
-            <div class="seal-lock-bar"></div>
-            <div class="seal-stamp">SEALED</div>
-          </div>
-        </div>
-      </div>
-      <div class="seal-status-line">Generating DD1750s&hellip;</div>`;
-    document.body.appendChild(overlay);
-
-    const doorL  = overlay.querySelector(".seal-door-left");
-    const doorR  = overlay.querySelector(".seal-door-right");
-    const bar    = overlay.querySelector(".seal-lock-bar");
-    const stamp  = overlay.querySelector(".seal-stamp");
-    const star   = overlay.querySelector(".seal-side-star");
-    const badge  = overlay.querySelector(".seal-side-badge");
-    const status = overlay.querySelector(".seal-status-line");
-
-    // Fade in overlay, then sequence the connex closing
-    requestAnimationFrame(() => {
-      overlay.classList.add("seal-active");
-      setTimeout(() => doorL.classList.add("door-closed"),          350);
-      setTimeout(() => doorR.classList.add("door-closed"),          530);
-      setTimeout(() => { star.classList.add("visible"); badge.classList.add("visible"); }, 1100);
-      setTimeout(() => bar.classList.add("locked"),                 1350);
-      setTimeout(() => stamp.classList.add("visible"),              1950);
-      setTimeout(() => status.classList.add("visible"),             2150);
-      setTimeout(() => {
-        overlay.classList.remove("seal-active");
-        setTimeout(() => { overlay.remove(); resolve(); }, 380);
-      }, 3100);
-    });
-  });
-}
-
 window.applyStampAndGenerate = async function() {
   if (!STATE.connex) return;
   const uiStatus = $("review-generate-status");
-  if (uiStatus) uiStatus.textContent = "Sealing connex…";
+  if (uiStatus) uiStatus.textContent = "Sealing connex & generating DD1750s…";
 
-  // Fire the API call immediately; show animation concurrently
-  let apiError = null;
-  const unitLabel = (STATE.profile && STATE.profile.stamp_text) || "108TH ADA BDE";
-  const apiCall = api.download(
-    `/api/connex/${STATE.connex.connex_id}/generate`,
-    {},
-    `DD1750_${STATE.connex.connex_no || STATE.connex.connex_id}.zip`
-  ).catch(e => { apiError = e; });
-
-  await playSealAnimation(unitLabel);
-  await apiCall;
-
-  if (apiError) {
-    showError("review-generate-error", "Generate failed: " + apiError.message);
+  // Seal + generate the ZIP directly. The browser's own save-file dialog is the
+  // confirmation; no overlay animation (removed — it was resource-heavy and the
+  // download popup covered it anyway).
+  try {
+    await api.download(
+      `/api/connex/${STATE.connex.connex_id}/generate`,
+      {},
+      `DD1750_${STATE.connex.connex_no || STATE.connex.connex_id}.zip`
+    );
+  } catch (e) {
+    showError("review-generate-error", "Generate failed: " + e.message);
     if (uiStatus) uiStatus.textContent = "";
-  } else {
-    if (uiStatus) uiStatus.textContent = "Downloaded. Connex complete.";
-    goTo("NEXT_SITREP");
+    return;
   }
+  if (uiStatus) uiStatus.textContent = "Downloaded. Connex complete.";
+  goTo("NEXT_SITREP");
 };
 
 function disposeScene() {

@@ -1,0 +1,12 @@
+# Railway / NIXPACKS build config.
+#
+# Install the OCR system binaries that the Python wrappers shell out to:
+#   - tesseract-ocr : the actual OCR engine pytesseract calls
+#   - poppler-utils : provides pdftoppm, which pdf2image uses to rasterize PDFs
+#
+# Without these, OCR_AVAILABLE is True at runtime (the pip wrappers import fine)
+# but every OCR call raises TesseractNotFound / "Unable to get page count",
+# so image-only GCSS BOMs can't have their LIN / NIIN / end-item nomenclature
+# read from the header band — ingest silently falls back to the filename.
+[phases.setup]
+aptPkgs = ["tesseract-ocr", "poppler-utils"]

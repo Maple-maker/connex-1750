@@ -783,10 +783,13 @@ def extract_metadata(page_text: str) -> BomMetadata:
     if match:
         metadata.end_item_niin = _normalize_niin(match.group(1))
 
-    # LIN — bounded to exactly 6 alphanumerics (the real LIN width). The old
-    # unbounded [A-Z0-9]+ greedily swallowed adjacent header text (e.g. a LIN
-    # glued to the next column). \b stops the match at the field boundary.
-    match = re.search(r'LIN[:\s]*([A-Z0-9]{6})\b', page_text, re.IGNORECASE)
+    # LIN — read from the center admin "LIN:" field at the top of the BOM.
+    # \bLIN\b forces LIN to be a standalone label token (not a substring of
+    # another word, e.g. the unit DESC value "W81LNF"), [:\s]+ requires a real
+    # separator after the label, and {6}\b bounds the capture to the true LIN
+    # width so it can't swallow the next column. This anchors on the admin
+    # "LIN:" field specifically, never a stray match elsewhere on the page.
+    match = re.search(r'\bLIN\b[:\s]+([A-Z0-9]{6})\b', page_text, re.IGNORECASE)
     if match:
         metadata.lin = match.group(1).upper()
     
@@ -796,7 +799,7 @@ def extract_metadata(page_text: str) -> BomMetadata:
     #   "END ITEM NIIN: ... LIN: ... DESC: <model>"   (this is the one)
     # Anchor on the LIN: prefix to grab the right one. Stop at newline.
     match = re.search(
-        r'LIN[:\s]*[A-Z0-9]{6}\s+DESC[:\s]*([^\n\r]+)',
+        r'\bLIN\b[:\s]+[A-Z0-9]{6}\s+DESC[:\s]*([^\n\r]+)',
         page_text, re.IGNORECASE,
     )
     if match:
@@ -1011,15 +1014,54 @@ def extract_metadata_via_ocr_header(pdf_path: str, metadata: BomMetadata,
             metadata.end_item_niin = _normalize_niin(m.group(1))
 
     # --- LIN: label "LIN", value is 6 alphanumerics --------------------------
+    # The LIN's leading letter is OCR-prone: tesseract reads "S78397" as
+    # "$78397" on this form. Map the common symbol confusable ($->S) before
+    # matching so the value isn't lost to a stray glyph.
     if not metadata.lin:
-        raw = values_right_of(['LIN'])
-        m = re.search(r'([A-Z0-9]{6})', raw.upper())
+        raw = values_right_of(['LIN']).upper().replace('$', 'S')
+        m = re.search(r'([A-Z0-9]{6})', raw)
         if m:
             metadata.lin = m.group(1)
 
-    # --- DESC: label "DESC", value is free text ------------------------------
+    # --- DESC: the END-ITEM description ---------------------------------------
+    # It sits on the SAME header line as LIN / END ITEM NIIN (e.g.
+    # "...LIN: S78397  DESC: SATELLITE COMMUNICA"). A SECOND "DESC:" on the
+    # FE/UIC line above carries the UNIT desc, which values_right_of(['DESC'])
+    # would grab first. Anchor to the DESC that shares a line with LIN (or the
+    # END ITEM NIIN), and only fall back to the first DESC if that fails.
     if not metadata.end_item_description:
-        raw = values_right_of(['DESC'])
+        def desc_on_line_of(anchor_words):
+            n = len(anchor_words)
+            anchor = None
+            for idx in range(len(words) - n + 1):
+                window = words[idx:idx + n]
+                if [w['text'].upper().strip(':') for w in window] == anchor_words:
+                    anchor = window[-1]
+                    break
+            if anchor is None:
+                return ''
+            descs = [w for w in words
+                     if w['text'].upper().strip(':') == 'DESC'
+                     and w['line'] == anchor['line'] and w['x'] > anchor['x']]
+            if not descs:
+                return ''
+            d = min(descs, key=lambda w: w['x'])
+            label_right = d['x'] + d['w']
+            gap_limit = label_right + int(img_w * 0.45)
+            vals = [w for w in words
+                    if w['x'] > label_right and w['x'] <= gap_limit
+                    and abs(w['y'] - d['y']) <= d['h'] * 0.8]
+            vals.sort(key=lambda w: w['x'])
+            out_tokens = []
+            for w in vals:
+                if w['text'].endswith(':') and out_tokens:
+                    break
+                out_tokens.append(w['text'].strip(':'))
+            return ' '.join(out_tokens).strip()
+
+        raw = (desc_on_line_of(['LIN'])
+               or desc_on_line_of(['END', 'ITEM', 'NIIN'])
+               or values_right_of(['DESC']))
         if raw:
             metadata.end_item_description = raw[:50]
 

@@ -69,6 +69,25 @@ def test_lin_bounded_to_six_chars():
     print("PASS  test_lin_bounded_to_six_chars")
 
 
+def test_satellite_bom_lin_and_nomenclature_from_center_admin():
+    """LIN + end-item DESC come from the center admin band of the BOM header,
+    never from the unit-DESC token (W81LNF) on the line above. Reference BOM:
+    LIN S78397 | NIIN 015476611 | DESC SATELLITE COMMUNICA | SER 0095."""
+    header = (
+        "Date: 03/30/2026   COMPONENT LISTING / HAND RECEIPT   Page 1 of 1\n"
+        "FE: 40370539   UIC: WH1ZB0   DESC: W81LNF 0004 AD BN 03 BTY B ADA BA   SLOC: AS8J\n"
+        "END ITEM NIIN: 015476611   LIN: S78397   DESC: SATELLITE COMMUNICA   TO: Jaiden D. Rabatin\n"
+        "SER/EQUIP NO: 0095   PUB/BOM SOURCE:   FROM: James M. Holland\n"
+    )
+    meta = extract_metadata(header)
+    assert meta.lin == "S78397", f"LIN not from center admin field: {meta.lin!r}"
+    assert meta.lin != "W81LNF", "LIN wrongly grabbed the unit-DESC token!"
+    assert meta.end_item_niin == "015476611", f"NIIN parse failed: {meta.end_item_niin!r}"
+    assert meta.end_item_description.startswith("SATELLITE COMMUNICA"), \
+        f"end-item nomenclature (DESC) parse failed: {meta.end_item_description!r}"
+    print("PASS  test_satellite_bom_lin_and_nomenclature_from_center_admin")
+
+
 def test_golden_bom_niin_from_content_when_renamed():
     """When OCR can actually run, the NIIN must come from the header image even
     if the filename is stripped of identifiers (NIIN is never in the filename)."""
@@ -102,6 +121,40 @@ def test_golden_bom_niin_from_content_when_renamed():
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+def test_form_bom_lin_and_nomenclature_from_content_when_renamed():
+    """The crux regression: a GCSS form BOM (no extractable text) routed through
+    bom_parser must still recover LIN + end-item nomenclature from the header
+    IMAGE via OCR — NOT from the filename. Proven by renaming the file to a
+    neutral name so the filename fallback can't supply LIN/nomenclature."""
+    if not _tesseract_runnable():
+        print("SKIP  test_form_bom_lin_and_nomenclature_from_content_when_renamed (tesseract binary not on PATH)")
+        return
+
+    src = (
+        "/Users/jaidenrabatin/Desktop/AEGIS/30-PROJECTS/active/1750_bulk_editor/"
+        "CONNEX_1750_AGENT_STARTER/FC BOMS/0095 S78397 SATELLITE COMMUNICA.pdf"
+    )
+    if not os.path.exists(src):
+        print(f"SKIP  test_form_bom_lin_and_nomenclature_from_content_when_renamed (fixture missing)")
+        return
+
+    import shutil, tempfile
+    tmpdir = tempfile.mkdtemp()
+    neutral = os.path.join(tmpdir, "random item.pdf")
+    shutil.copyfile(src, neutral)
+    try:
+        r = ingest_bom(neutral, nomenclature="random item")
+        assert r["lin"] == "S78397", f"LIN not from content (got {r['lin']!r}, filename had none)"
+        assert r["lin_source"] == "content", f"lin_source: {r['lin_source']!r}"
+        assert "SATELLITE COMMUNICA" in r["nomenclature"].upper(), \
+            f"nomenclature came from filename, not header DESC: {r['nomenclature']!r}"
+        assert r["end_item_niin"] == "015476611", f"NIIN: {r['end_item_niin']!r}"
+        print("PASS  test_form_bom_lin_and_nomenclature_from_content_when_renamed "
+              f"(lin={r['lin']} nomen={r['nomenclature']!r})")
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def _run_issue4_regression():
     print(f"\n{'='*70}")
     print(f"Issue 4 regression  (OCR_AVAILABLE={OCR_AVAILABLE}, "
@@ -109,7 +162,9 @@ def _run_issue4_regression():
     test_extract_metadata_from_ocr_header_text()
     test_niin_normalization_unit()
     test_lin_bounded_to_six_chars()
+    test_satellite_bom_lin_and_nomenclature_from_center_admin()
     test_golden_bom_niin_from_content_when_renamed()
+    test_form_bom_lin_and_nomenclature_from_content_when_renamed()
 
 TEST_BOMS = [
     (

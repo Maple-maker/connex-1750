@@ -24,7 +24,10 @@ import os
 import uuid
 
 # ── Primary extractor (v25 multi-format) ──────────────────────────────────────
-from dd1750_core import extract_items_from_pdf, ExtractionResult
+from dd1750_core import (
+    extract_items_from_pdf, ExtractionResult,
+    extract_metadata_via_ocr_header, BomMetadata,
+)
 
 # ── Fallback extractor (AcroForm form-field reader) ───────────────────────────
 import bom_parser as _bom_parser
@@ -166,6 +169,45 @@ def ingest_bom(pdf_path: str, nomenclature: str = "") -> dict:
         except Exception as exc:
             out["errors"].append(f"bom_parser extraction failed: {exc}")
 
+        # ── PHASE 1b: admin-header OCR recovery (form-field BOMs) ─────────────
+        # On these GCSS Component Listings the LIN and the end-item DESC
+        # (nomenclature) are printed in the header IMAGE, not in fillable fields
+        # — bom_parser can only recover NIIN (encoded in a field name) and the
+        # serial (the 'undefined' field). Without this, LIN comes back empty and
+        # the nomenclature falls back to the filename, so renaming the file
+        # breaks automated ingest. Pull LIN / DESC (and any still-missing
+        # NIIN / UIC / serial) straight from the header band by OCR. Guarded by
+        # OCR_AVAILABLE inside the call; a no-op when tesseract is absent.
+        #
+        # bom_parser falls back to the upload FILENAME for the description when
+        # it can't read the header (DESC is printed in the header image, not a
+        # field). Treat a filename-echo as "no content desc" so the OCR pass
+        # below supplies the real end-item nomenclature instead of the filename.
+        if out["model"] and out["model"].strip().upper() == stem.strip().upper():
+            out["model"] = ""
+
+        if not out["lin"] or not out["model"]:
+            try:
+                _hdr = extract_metadata_via_ocr_header(pdf_path, BomMetadata(
+                    end_item_niin=out["end_item_niin"],
+                    lin=out["lin"],
+                    serial_equip_no=out["serial_number"],
+                    end_item_description=out["model"],
+                    uic=out["uic"],
+                ))
+                if not out["lin"] and _hdr.lin:
+                    out["lin"] = _hdr.lin
+                if not out["model"] and _hdr.end_item_description:
+                    out["model"] = _hdr.end_item_description
+                if not out["end_item_niin"] and _hdr.end_item_niin:
+                    out["end_item_niin"] = _hdr.end_item_niin
+                if not out["uic"] and _hdr.uic:
+                    out["uic"] = _hdr.uic
+                if not out["serial_number"] and _hdr.serial_equip_no:
+                    out["serial_number"] = _hdr.serial_equip_no
+            except Exception as exc:
+                out["warnings"].append(f"admin-header OCR pass failed: {exc}")
+
     else:
         # ── PHASE 1 (text PDF): v25 multi-format extractor ───────────────────
         v25_result: ExtractionResult | None = None
@@ -256,6 +298,15 @@ def ingest_bom(pdf_path: str, nomenclature: str = "") -> dict:
             out["warnings"].append(f"Serial '{parsed.sn}' recovered from filename.")
         if not out["model"] and parsed.model:
             out["model"] = parsed.model
+
+    # ── PHASE 3b: nomenclature label = end-item description, NOT the filename ──
+    # The box rows and the Master 1750 show `nomenclature`. It was defaulting to
+    # the upload filename stem, which is meaningless on the document. The real
+    # end-item nomenclature is the BOM admin-header "DESC:" field (e.g.
+    # "SATELLITE COMMUNICA"), which extraction stores in `model`. Prefer that;
+    # keep the filename stem only as a last resort when no description was found.
+    if out["model"]:
+        out["nomenclature"] = out["model"]
 
     # ── PHASE 4: zero-on-hand end-item placeholder ────────────────────────────
     # A BOM whose components are ALL zero-on-hand extracts to an empty item list
