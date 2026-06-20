@@ -188,11 +188,12 @@ check("SHARE: rows sorted by box_num", row_box_nums == sorted(row_box_nums))
 box1_row = next(r for r in share_rows if r["box_num"] == 1)
 check("SHARE: box 1 qty == 2 (two end items)", box1_row["qty"] == 2)
 
-# Both models appear in the shared box's model string
-check("SHARE: box 1 model contains BOM0's model",
-      "RIFLE 5.56MM M4" in box1_row["model"])
-check("SHARE: box 1 model contains BOM2's model",
-      "LMG 5.56MM M249" in box1_row["model"])
+# Both labels appear in the shared box's label string. The CONTENTS label is
+# the end-item `nomenclature` (what the edit phase shows), not `model`.
+check("SHARE: box 1 model contains BOM0's nomenclature",
+      "RIFLE M4" in box1_row["model"])
+check("SHARE: box 1 model contains BOM2's nomenclature",
+      "MACHINE GUN M249" in box1_row["model"])
 
 # Both serials present
 check("SHARE: box 1 serials contains BOM0 serial",
@@ -203,8 +204,8 @@ check("SHARE: box 1 serials contains BOM2 serial",
 # box 2 should still be BOM1 only
 box2_row = next(r for r in share_rows if r["box_num"] == 2)
 check("SHARE: box 2 qty == 1", box2_row["qty"] == 1)
-check("SHARE: box 2 model is BOM1's model",
-      box2_row["model"] == "PISTOL 9MM M17")
+check("SHARE: box 2 model is BOM1's nomenclature",
+      box2_row["model"] == "PISTOL M17")
 
 
 # ---------------------------------------------------------------------------
@@ -245,8 +246,8 @@ check("SPLIT: box 9 row present", 9 in split_row_nums)
 # Both box 1 and box 9 reference BOM0 as the end item
 box1_split = next(r for r in split_rows if r["box_num"] == 1)
 box9_split  = next(r for r in split_rows if r["box_num"] == 9)
-check("SPLIT: box 1 model is BOM0's", "RIFLE 5.56MM M4" in box1_split["model"])
-check("SPLIT: box 9 model is BOM0's", "RIFLE 5.56MM M4" in box9_split["model"])
+check("SPLIT: box 1 model is BOM0's", "RIFLE M4" in box1_split["model"])
+check("SPLIT: box 9 model is BOM0's", "RIFLE M4" in box9_split["model"])
 check("SPLIT: box 9 qty == 1", box9_split["qty"] == 1)
 
 
@@ -273,7 +274,7 @@ for row in default_rows:
 
 # Spot-check default 1:1 values
 r1 = next(r for r in default_rows if r["box_num"] == 1)
-check("1:1 box 1 model == BOM0 model",   r1["model"] == "RIFLE 5.56MM M4")
+check("1:1 box 1 model == BOM0 nomenclature", r1["model"] == "RIFLE M4")
 check("1:1 box 1 lin   == BOM0 lin",     r1["lin"]   == "A12345")
 check("1:1 box 1 nsn   == BOM0 niin",    r1["nsn"]   == "010101010")
 check("1:1 box 1 serials contains BOM0", "SN-111111" in r1["serials"])

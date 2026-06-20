@@ -290,12 +290,16 @@ def boxes_to_master_rows(boms: list[dict], box_map: dict) -> list[dict]:
     for box_num in sorted(box_to_boms.keys()):
         contributing_boms = box_to_boms[box_num]
 
-        # Build the model string: prefer bom["model"], fall back to nomenclature.
+        # Build the CONTENTS label string. Prefer `nomenclature` — the accurate
+        # end-item name (header DESC) shown to the user during the edit phase —
+        # and fall back to the filename-derived `model` only when it is blank.
+        # This keeps the final 1750 identical to what the edit screen displays;
+        # preferring `model` here previously made the final retain the filename.
         # De-dup while preserving order.
         seen_models: set[str] = set()
         model_parts: list[str] = []
         for bom in contributing_boms:
-            label = (bom.get("model") or bom.get("nomenclature") or "").strip()
+            label = (bom.get("nomenclature") or bom.get("model") or "").strip()
             if label and label not in seen_models:
                 model_parts.append(label)
                 seen_models.add(label)

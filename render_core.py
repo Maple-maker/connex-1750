@@ -59,6 +59,91 @@ class BomItem:
     is_continuation: bool = False  # overflow serial row — skip box/qty/UOI/total
 
 
+# --- Description wrapping (content column) -------------------------------
+# The CONTENTS column runs X_CONTENT_L..X_CONTENT_R with PAD_X padding on the
+# left where text starts. Descriptions are drawn at Helvetica 8pt. Any text
+# wider than this must wrap to continuation rows or it spills into the UNIT OF
+# ISSUE column. We mirror master_core's geometry so all render paths agree.
+_DESC_AVAIL_PTS = X_CONTENT_R - X_CONTENT_L - 2 * PAD_X  # usable width at 8pt
+_DESC_FONT = "Helvetica"
+_DESC_SIZE = 8
+
+
+def _desc_width(text: str) -> float:
+    """Width of `text` at the description font/size; char-estimate fallback."""
+    try:
+        from reportlab.pdfbase.pdfmetrics import stringWidth
+        return stringWidth(text, _DESC_FONT, _DESC_SIZE)
+    except Exception:
+        return len(text) * 4.8  # ~4.8 pts/char at Helvetica 8pt
+
+
+def _wrap_description(text: str) -> List[str]:
+    """
+    Wrap a description into lines that fit the CONTENTS column at 8pt.
+
+    Word-wraps on spaces; a single token wider than the column (e.g. a long
+    comma-joined nomenclature like "ASSEMBLY,POWER,ELECTRICAL") is hard-broken
+    by character so it can never spill past the column edge.
+    """
+    text = (text or "").strip()
+    if not text:
+        return [""]
+
+    lines: List[str] = []
+    current = ""
+    for word in text.split():
+        # Hard-break any token that is itself wider than the column.
+        while _desc_width(word) > _DESC_AVAIL_PTS:
+            cut = len(word)
+            while cut > 1 and _desc_width(word[:cut]) > _DESC_AVAIL_PTS:
+                cut -= 1
+            if current:
+                lines.append(current)
+                current = ""
+            lines.append(word[:cut])
+            word = word[cut:]
+        candidate = (current + " " + word).strip() if current else word
+        if _desc_width(candidate) <= _DESC_AVAIL_PTS:
+            current = candidate
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines or [""]
+
+
+def _expand_description_overflow(items: List["BomItem"]) -> List["BomItem"]:
+    """
+    Split any primary row whose description overflows the CONTENTS column.
+
+    The first wrapped line stays on the primary row; each extra line becomes a
+    continuation row (description-only), mirroring
+    master_core.rows_to_bom_items. Rows that already fit — and continuation
+    rows — pass through unchanged, so paths that pre-wrap are left intact.
+    """
+    expanded: List["BomItem"] = []
+    for item in items:
+        if item.is_continuation or not item.description:
+            expanded.append(item)
+            continue
+        lines = _wrap_description(item.description)
+        item.description = lines[0]
+        expanded.append(item)
+        for extra in lines[1:]:
+            expanded.append(BomItem(
+                line_no=item.line_no,
+                description=extra,
+                nsn="",
+                qty=item.qty,
+                unit_of_issue=item.unit_of_issue,
+                is_continuation=True,
+            ))
+    return expanded
+
+
 @dataclass
 class HeaderInfo:
     """Header information for the DD1750 form (multi-line strings allowed)."""
@@ -316,7 +401,9 @@ def generate_dd1750_overlay(
             can.drawCentredString(box_center_x, y_line1, str(item.line_no))
 
             # Line 1: description / model (left-aligned with padding)
-            # Wrapping/splitting is pre-computed in master_core.rows_to_bom_items.
+            # Description overflow is split into continuation rows by
+            # _expand_description_overflow() before pagination, so each line
+            # here already fits the CONTENTS column.
             can.setFont("Helvetica", 8)
             can.drawString(X_CONTENT_L + PAD_X, y_line1, item.description)
 
@@ -401,6 +488,11 @@ def generate_dd1750_from_items(
         with open(output_path, 'wb') as f:
             writer.write(f)
         return output_path, 0
+
+    # Wrap any description that overflows the CONTENTS column into continuation
+    # rows so long nomenclatures never spill into the UNIT OF ISSUE column. This
+    # is idempotent for paths that already pre-wrap (e.g. master_core).
+    items = _expand_description_overflow(items)
 
     total_pages = math.ceil(len(items) / ROWS_PER_PAGE)
     writer = PdfWriter()
