@@ -13,6 +13,7 @@
 :root {
   /* ── core palette ─────────────────────────────────────── */
   --connex-gold:  #D4BF91;   /* primary accent, complete state, key CTAs */
+  --connex-blue:  #4A7FB5;   /* SSI insignia badge                       */
   --connex-gray:  #B2B4B3;   /* container body, neutral text             */
   --connex-light: #E9EAEC;   /* bright text on dark panels (titles/values)*/
   --connex-black: #0E0F11;   /* command-center base background           */

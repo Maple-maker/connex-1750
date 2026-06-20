@@ -269,6 +269,43 @@ body::after {
   border-color: var(--connex-gold);
 }
 
+/* Insignia cascade — echelon tier selector */
+.cx-3tier-tab {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: 1px solid var(--connex-stroke);
+  border-radius: var(--radius-md);
+  color: var(--connex-gray);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.cx-3tier-tab:hover {
+  border-color: var(--connex-gold);
+  color: var(--connex-light);
+}
+
+.cx-3tier-tab--active {
+  background: rgba(212, 191, 145, 0.12);
+  border-color: var(--connex-gold);
+  color: var(--connex-gold);
+  font-weight: 600;
+}
+
+/* Insignia gallery card hover */
+.cx-formation-card {
+  transition: outline 0.12s ease, transform 0.12s ease;
+}
+
+.cx-formation-card:hover {
+  outline: 2px solid var(--connex-gold);
+  outline-offset: 2px;
+  transform: translateY(-2px);
+}
+
 /* Danger */
 .cx-btn--danger {
   background: transparent;

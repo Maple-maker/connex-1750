@@ -1006,6 +1006,48 @@ def extract_metadata_via_ocr_header(pdf_path: str, metadata: BomMetadata,
             return ' '.join(out_tokens).strip()
         return ''
 
+    def reocr_value_cell(label_words):
+        """
+        Re-OCR just the value cell to the RIGHT of a label at single-line PSM
+        with an A-Z0-9 whitelist. The whole-band `--psm 6` pass mangles an
+        isolated leading glyph — a LIN's 'E' is read as '£', an 'S' as '$' —
+        which then fails the value regex. Guessing the symbol->letter mapping is
+        unreliable ('£' is equally an 'E' or an 'L'), so instead we crop the
+        value cell and OCR it alone, where tesseract reads the glyph correctly.
+        Returns the uppercased OCR string (no regex applied), or '' on failure.
+        """
+        n = len(label_words)
+        for idx in range(len(words) - n + 1):
+            window = words[idx:idx + n]
+            if [w['text'].upper().strip(':') for w in window] != label_words:
+                continue
+            last = window[-1]
+            x0 = last['x'] + last['w'] + 4
+            y0 = max(0, last['y'] - 6)
+            y1 = last['y'] + last['h'] + 6
+            # Bound the right edge at the next label-looking token on the same
+            # line (e.g. "DESC:" after the LIN value) so we don't OCR into it.
+            x1 = x0 + int(img_w * 0.12)
+            for w in words:
+                if (w['x'] > x0 and abs(w['y'] - last['y']) <= last['h'] * 0.8
+                        and w['text'].endswith(':') and w['x'] < x1):
+                    x1 = w['x'] - 4
+            if x1 <= x0:
+                return ''
+            try:
+                cell = band.crop((x0, y0, x1, y1))
+                cell = cell.resize((cell.width * 3, cell.height * 3))
+                txt = _pytesseract.image_to_string(
+                    cell,
+                    config='--psm 7 -c '
+                           'tessedit_char_whitelist='
+                           'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+                )
+                return txt.strip().upper()
+            except Exception:
+                return ''
+        return ''
+
     # --- NIIN: label "END ITEM NIIN", value is 9 confusable-digits -----------
     if not metadata.end_item_niin:
         raw = values_right_of(['END', 'ITEM', 'NIIN'])
@@ -1020,6 +1062,12 @@ def extract_metadata_via_ocr_header(pdf_path: str, metadata: BomMetadata,
     if not metadata.lin:
         raw = values_right_of(['LIN']).upper().replace('$', 'S')
         m = re.search(r'([A-Z0-9]{6})', raw)
+        if not m:
+            # The band OCR mangled the LIN's leading letter into a symbol
+            # ('E05003' -> '£05003'), so the 6-char match fails. Re-OCR the LIN
+            # value cell in isolation, which reads the leading glyph correctly.
+            raw = reocr_value_cell(['LIN'])
+            m = re.search(r'([A-Z0-9]{6})', raw)
         if m:
             metadata.lin = m.group(1)
 

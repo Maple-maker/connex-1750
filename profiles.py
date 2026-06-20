@@ -80,6 +80,9 @@ def upsert_profile(
     default_shrh_poc: str = "",
     stamp_text: str = "",
     brigade_image: str = "",
+    division: str = "",
+    division_image: str = "",
+    battalion_image: str = "",
 ) -> dict:
     """
     Create or update a profile identified by (brigade, battalion, battery).
@@ -88,9 +91,12 @@ def upsert_profile(
     is updated in place and its last_used timestamp is refreshed.  Otherwise a
     new profile_id is minted and a new file is written.
 
-    brigade_image: insignia filename from static/formations/ manifest
-                   (e.g. "108th_Air_Defense_Artillery_Brigade.svg"). Default ""
-                   for back-compat with profiles created before this field.
+    Insignia fields are filenames from the static/formations/ manifest. All
+    default "" for back-compat with profiles created before each field existed:
+      brigade_image  : the brigade SSI (e.g. "1st_Brigade...svg")
+      division       : the division name (e.g. "82nd Airborne Division")
+      division_image : the division SSI
+      battalion_image: the battalion/regiment DUI
 
     Returns the final profile dict.
     """
@@ -117,6 +123,9 @@ def upsert_profile(
             "default_shrh_poc": default_shrh_poc,
             "stamp_text": stamp_text,
             "brigade_image": brigade_image,
+            "division": division,
+            "division_image": division_image,
+            "battalion_image": battalion_image,
             "last_used": now,
         })
         profile = existing
@@ -131,6 +140,9 @@ def upsert_profile(
             "default_shrh_poc": default_shrh_poc,
             "stamp_text": stamp_text,
             "brigade_image": brigade_image,
+            "division": division,
+            "division_image": division_image,
+            "battalion_image": battalion_image,
             "created": now,
             "last_used": now,
         }

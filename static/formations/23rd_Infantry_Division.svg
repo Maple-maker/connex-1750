@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+<svg
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns="http://www.w3.org/2000/svg"
+   version="1.0"
+   width="165.78665"
+   height="200.57274"
+   id="svg6442">
+  <defs
+     id="defs6444">
+    <clipPath
+       id="id36">
+      <path
+   d="M 491.7,13.5 L 596.1,13.5 L 596.1,135 L 491.7,135 L 491.7,13.5 z"
+   id="path184" />
+
+    </clipPath>
+  </defs>
+  <g
+     transform="translate(-18.119649,-26.400426)"
+     id="layer1">
+    <g
+       transform="matrix(1.8657061,0,0,-1.8657061,-909.85458,260.55587)"
+       clip-path="url(#id36)"
+       id="g1292">
+          <path
+   d="M 541.796,125.505 L 497.385,125.505 L 497.385,67.546 C 497.385,67.546 499.772,30.336 541.796,18 C 583.859,30.336 586.245,67.546 586.245,67.546 L 586.245,125.505 L 541.796,125.505 z"
+   id="path1294"
+   style="fill:#0060a9;fill-rule:nonzero;stroke:none" />
+
+          <path
+   d="M 511.828,71.712 L 513.59,78.285 L 507.889,81.955 L 514.675,82.311 L 516.437,88.883 L 518.875,82.531 L 525.661,82.887 L 520.375,78.64 L 522.815,72.288 L 517.112,75.999 L 511.828,71.712 z"
+   id="path1296"
+   style="fill:#ffffff;fill-rule:nonzero;stroke:none" />
+
+          <path
+   d="M 535.558,98.067 L 537.322,104.599 L 531.62,108.31 L 538.405,108.666 L 540.166,115.238 L 542.606,108.886 L 549.351,109.239 L 544.107,104.955 L 546.504,98.64 L 540.844,102.313 L 535.558,98.067 z"
+   id="path1298"
+   style="fill:#ffffff;fill-rule:nonzero;stroke:none" />
+
+          <path
+   d="M 545.197,34.701 L 547.331,42.67 L 540.412,47.168 L 548.652,47.6 L 550.786,55.569 L 553.741,47.866 L 561.981,48.298 L 555.571,43.102 L 558.526,35.4 L 551.608,39.897 L 545.197,34.701 z"
+   id="path1300"
+   style="fill:#ffffff;fill-rule:nonzero;stroke:none" />
+
+          <path
+   d="M 561.626,82.908 L 562.917,87.634 L 558.808,90.294 L 563.695,90.55 L 564.949,95.233 L 566.684,90.707 L 571.572,90.963 L 567.764,87.888 L 569.542,83.323 L 565.433,85.983 L 561.626,82.908 z"
+   id="path1302"
+   style="fill:#ffffff;fill-rule:nonzero;stroke:none" />
+
+        </g>
+  </g>
+</svg>

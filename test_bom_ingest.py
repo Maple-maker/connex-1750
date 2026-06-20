@@ -155,6 +155,35 @@ def test_form_bom_lin_and_nomenclature_from_content_when_renamed():
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+def test_lin_leading_glyph_reocr_from_content():
+    """A LIN whose leading letter is mangled by the whole-band OCR ('E05003'
+    read as '£05003') must still be recovered via the focused value-cell re-OCR
+    fallback. Reference BOM (test 1.pdf): LIN E05003 | NIIN 015302811 |
+    DESC ENCRYPTION-DECRYPTI (truncated on the form itself). The filename
+    'test 1' carries no LIN, so a recovered E05003 PROVES it came from content."""
+    if not _tesseract_runnable():
+        print("SKIP  test_lin_leading_glyph_reocr_from_content (tesseract binary not on PATH)")
+        return
+
+    src = (
+        "/Users/jaidenrabatin/Desktop/AEGIS/30-PROJECTS/active/1750_bulk_editor/"
+        "CONNEX_1750_AGENT_STARTER/FC BOMS/test 1.pdf"
+    )
+    if not os.path.exists(src):
+        print(f"SKIP  test_lin_leading_glyph_reocr_from_content (fixture missing)")
+        return
+
+    r = ingest_bom(src, nomenclature="test 1")
+    assert r["lin"] == "E05003", \
+        f"LIN leading glyph not recovered via re-OCR (got {r['lin']!r}, expected E05003)"
+    assert r["lin_source"] == "content", f"lin_source: {r['lin_source']!r}"
+    assert r["end_item_niin"] == "015302811", f"NIIN: {r['end_item_niin']!r}"
+    assert r["nomenclature"].upper().startswith("ENCRYPTION-DECRYPTI"), \
+        f"nomenclature came from filename, not header DESC: {r['nomenclature']!r}"
+    print("PASS  test_lin_leading_glyph_reocr_from_content "
+          f"(lin={r['lin']} nomen={r['nomenclature']!r})")
+
+
 def _run_issue4_regression():
     print(f"\n{'='*70}")
     print(f"Issue 4 regression  (OCR_AVAILABLE={OCR_AVAILABLE}, "
@@ -165,6 +194,7 @@ def _run_issue4_regression():
     test_satellite_bom_lin_and_nomenclature_from_center_admin()
     test_golden_bom_niin_from_content_when_renamed()
     test_form_bom_lin_and_nomenclature_from_content_when_renamed()
+    test_lin_leading_glyph_reocr_from_content()
 
 TEST_BOMS = [
     (

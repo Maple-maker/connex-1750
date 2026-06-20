@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="600" height="600">
+  <defs
+     id="defs6">
+    <linearGradient
+       id="linearGradient3796">
+      <stop
+         id="stop3798"
+         style="stop-color:#eb3749;stop-opacity:1"
+         offset="0" />
+      <stop
+         id="stop3804"
+         style="stop-color:#d6273b;stop-opacity:1"
+         offset="0.40000001" />
+      <stop
+         id="stop3800"
+         style="stop-color:#c2172e;stop-opacity:1"
+         offset="1" />
+    </linearGradient>
+    <radialGradient
+       cx="300"
+       cy="300"
+       r="274.77963"
+       fx="300"
+       fy="300"
+       id="radialGradient3802"
+       xlink:href="#linearGradient3796"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(1,0,0,1.0039679,0,-1.1928701)" />
+  </defs>
+  <rect
+     width="600"
+     height="600"
+     x="0"
+     y="0"
+     id="rect3806"
+     style="fill:#ffffff" />
+  <path
+     d="m 43.65625,39.03125 513.28125,0 0,522.28125 -513.28125,0 0,-522.28125 z"
+     id="rect2993"
+     style="fill:#ffbb0d" />
+  <path
+     d="m 89.634155,24.760172 -61.880214,0 L 27.274696,91.008839 236.11483,299.84897 24.606898,511.3569 l 0,63.6431 63.872748,0 L 299.85597,363.73931 512.50027,576.5 573,576.5 573,508.39059 364.17708,299.45338 574.16613,89.464331 l 0,-63.635035 -63.88164,0 -209.9057,209.790864 z"
+     id="path3794"
+     style="fill:url(#radialGradient3802)" />
+  <path
+     d="m 14.90625,15.03125 0,570.15625 570.125,0 0,-570.15625 -570.125,0 z m 28.75,24 513.28125,0 0,522.28125 -513.28125,0 0,-522.28125 z"
+     id="path3003"
+     style="fill:#726a36" />
+</svg>

@@ -20,7 +20,12 @@ let STATE = {
   step: "PROFILE",
   profile: null,
   formations: [],
-  selectedFormation: null,
+  // Insignia cascade selections (Division → Brigade → Battalion DUI).
+  _currentTier: "division",
+  selectedDivision: null,      // SSI patch (echelon Division)
+  selectedBrigade: null,       // SSI patch (echelon Brigade) — the unit identity
+  selectedBattalionDUI: null,  // DUI patch (echelon Regiment/Battalion)
+  selectedFormation: null,     // legacy alias kept in sync with selectedBrigade
   connex: null,
   job_id: null,
   boms: [],
@@ -41,6 +46,28 @@ const STEP_LABELS = {
   REVIEW_SEAL:  { label: "Review & Seal",  sub: "Final check + apply stamp" },
   NEXT_SITREP:  { label: "Next / SITREP",  sub: "Another connex or finish" },
 };
+
+/* =========================================================
+ * INSIGNIA CASCADE — tier config + badges
+ * Three echelon tiers feed the profile gallery. The patch manifest carries no
+ * parent→child linkage, so each tier is an independent picker; the breadcrumb
+ * concatenates whatever was chosen at each level (not a filtered drill-down).
+ * ========================================================= */
+const TIERS = {
+  division:  { label: "Division",  echelons: ["Division"],                        defType: "SSI" },
+  brigade:   { label: "Brigade",   echelons: ["Brigade"],                         defType: "SSI" },
+  // "Other" folds the handful of motto/camp DUIs into the battalion tier so no
+  // manifest entry is orphaned out of every picker.
+  battalion: { label: "Battalion", echelons: ["Regiment", "Battalion", "Other"], defType: "DUI" },
+};
+
+// SSI = shoulder sleeve insignia (blue badge); DUI = distinctive unit insignia
+// / crest (gold badge). Inline-styled off the design tokens to keep CSS minimal.
+function insigniaBadge(type) {
+  if (type === "SSI") return `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:var(--radius-sm);background:var(--connex-blue);color:#fff;">SSI</span>`;
+  if (type === "DUI") return `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:var(--radius-sm);background:var(--connex-gold);color:#1a1a1a;">DUI</span>`;
+  return "";
+}
 
 /* =========================================================
  * API helpers
@@ -223,13 +250,16 @@ function renderBanner() {
     return;
   }
   const p = STATE.profile;
-  const imgSrc = p.brigade_image ? `/static/formations/${esc(p.brigade_image)}` : "";
-  const emblem = imgSrc
-    ? `<img src="${imgSrc}" alt="${esc(p.brigade || "")}" class="cx-banner__emblem"
+  const patch = (file, alt) => file
+    ? `<img src="/static/formations/${esc(file)}" alt="${esc(alt || "")}" class="cx-banner__emblem"
             width="40" height="40" style="object-fit:contain;" loading="lazy"
-            onerror="this.outerHTML='<span class=\\'cx-banner__emblem\\'>&#x1F4E6;</span>'">`
+            onerror="this.style.display='none'">`
+    : "";
+  // Division SSI (when present) shown alongside the brigade SSI.
+  const emblems = (p.division_image || p.brigade_image)
+    ? `${patch(p.division_image, p.division)}${patch(p.brigade_image, p.brigade)}`
     : `<span class="cx-banner__emblem">&#x1F4E6;</span>`;
-  el.innerHTML = `${emblem}
+  el.innerHTML = `${emblems}
     <span class="cx-banner__body">
       <span class="cx-banner__unit">${esc(p.brigade || "")}</span>
       <span class="cx-banner__sub">${esc(p.battalion || "")}${p.battery ? " — " + esc(p.battery) + " BTY" : ""}</span>
@@ -259,19 +289,24 @@ function renderProfileStep(center, right) {
     <div class="cx-panel" id="profile-resume-wrap" style="display:none;margin-bottom:var(--space-4);"></div>
 
     <div class="cx-panel" id="profile-gallery-panel">
-      <h2 class="cx-panel__title">1 &middot; Select Your Brigade</h2>
-      <p class="cx-field-hint">Pick your unit insignia, then fill in battalion details below.</p>
+      <h2 class="cx-panel__title">1 &middot; Select Your Unit Insignia</h2>
+      <p class="cx-field-hint">Work down the echelons: Division → Brigade → Battalion. Brigade is required; the others are optional.</p>
+
+      <div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-3);">
+        <button type="button" class="cx-3tier-tab cx-3tier-tab--active" data-tier="division"  onclick="switchTier('division')">Division</button>
+        <button type="button" class="cx-3tier-tab"                       data-tier="brigade"   onclick="switchTier('brigade')">Brigade</button>
+        <button type="button" class="cx-3tier-tab"                       data-tier="battalion" onclick="switchTier('battalion')">Battalion</button>
+      </div>
+
+      <div id="cascade-breadcrumb" style="display:flex;align-items:center;flex-wrap:wrap;gap:var(--space-2);margin-bottom:var(--space-3);min-height:1.4em;"></div>
+
       <div style="display:flex;gap:var(--space-3);flex-wrap:wrap;margin-bottom:var(--space-4);">
         <input class="cx-field" id="gallery-search" placeholder="Search unit name…"
                style="flex:1;min-width:160px;" oninput="filterGallery()">
-        <select class="cx-field" id="gallery-echelon" style="width:160px;" onchange="filterGallery()">
-          <option value="">All Echelons</option>
-          <option value="Brigade" selected>Brigade</option>
-          <option value="Division">Division</option>
-          <option value="Corps">Corps</option>
-          <option value="Army">Army</option>
-          <option value="Regiment">Regiment</option>
-          <option value="Group">Group</option>
+        <select class="cx-field" id="gallery-insignia" style="width:140px;" onchange="renderGallery()">
+          <option value="SSI">SSI</option>
+          <option value="DUI">DUI</option>
+          <option value="All">All types</option>
         </select>
       </div>
       <div id="insignia-grid" style="
@@ -317,7 +352,7 @@ function renderProfileStep(center, right) {
       <div id="profile-save-error" role="alert" class="cx-field-error-msg" style="display:none;"></div>
       <div style="display:flex;gap:var(--space-3);margin-top:var(--space-4);">
         <button class="cx-btn cx-btn--primary" onclick="saveProfile()">Save &amp; Continue</button>
-        <button class="cx-btn cx-btn--ghost"   onclick="clearBrigadeSelection()">Change Brigade</button>
+        <button class="cx-btn cx-btn--ghost"   onclick="resetCascade()">Reset Selections</button>
       </div>
     </div>`;
 
@@ -348,7 +383,9 @@ async function loadProfilesAndGallery() {
     );
     if (profiles.length) renderResumeCard(profiles[0]);
   } catch (_) {}
-  renderGallery();
+  // If a brigade was already chosen this session, keep its detail panel open.
+  if (STATE.selectedBrigade) showDetailPanel(STATE.selectedBrigade);
+  switchTier(STATE._currentTier);
 }
 
 function renderResumeCard(p) {
@@ -382,11 +419,16 @@ window.resumeSavedProfile = async function(profileId) {
   try {
     const data = await api.get(`/api/profiles/${profileId}`);
     STATE.profile = data.profile;
-    if (STATE.profile.brigade_image) {
-      STATE.selectedFormation = STATE.formations.find(
-        f => f.file === STATE.profile.brigade_image
-      ) || { file: STATE.profile.brigade_image, name: STATE.profile.brigade };
-    }
+    const p = STATE.profile;
+    // Re-hydrate the cascade selections from the saved insignia filenames so a
+    // resumed profile shows its full Division/Brigade/Battalion chain.
+    const lookup = (file, name) => file
+      ? (STATE.formations.find(f => f.file === file) || { file, name: name || file })
+      : null;
+    STATE.selectedBrigade      = lookup(p.brigade_image, p.brigade);
+    STATE.selectedFormation    = STATE.selectedBrigade;   // legacy alias
+    STATE.selectedDivision     = lookup(p.division_image, p.division);
+    STATE.selectedBattalionDUI = lookup(p.battalion_image, "");
     renderBanner();
     goTo("CONNEX_SETUP");
   } catch (e) {
@@ -399,25 +441,68 @@ window.dismissResumeCard = function() {
   if (wrap) wrap.style.display = "none";
 };
 
+// Selection slot for a given tier.
+function tierSelection(tier) {
+  return tier === "division" ? STATE.selectedDivision
+       : tier === "battalion" ? STATE.selectedBattalionDUI
+       : STATE.selectedBrigade;
+}
+
+// Switch the active echelon tier: update tab styling, reset the insignia-type
+// filter to that tier's default (SSI for division/brigade, DUI for battalion),
+// then re-render the breadcrumb and grid.
+window.switchTier = function(tier) {
+  if (!TIERS[tier]) return;
+  STATE._currentTier = tier;
+  document.querySelectorAll(".cx-3tier-tab").forEach(b => {
+    b.classList.toggle("cx-3tier-tab--active", b.dataset.tier === tier);
+  });
+  const sel = $("gallery-insignia");
+  if (sel) sel.value = TIERS[tier].defType;
+  renderCascade();
+};
+
+// Render the breadcrumb chain + the gallery grid for the current tier.
+function renderCascade() {
+  renderBreadcrumb();
+  renderGallery();
+}
+
+function renderBreadcrumb() {
+  const el = $("cascade-breadcrumb");
+  if (!el) return;
+  const seg = (sel, fallback) => sel
+    ? `<span class="cx-crumb">${insigniaBadge(sel.insignia_type)} <span>${esc(sel.name)}</span></span>`
+    : `<span class="cx-crumb" style="opacity:.45;">${fallback}</span>`;
+  el.innerHTML = [
+    seg(STATE.selectedDivision, "Division —"),
+    seg(STATE.selectedBrigade, "Brigade —"),
+    seg(STATE.selectedBattalionDUI, "Battalion —"),
+  ].join(`<span style="opacity:.5;">&rsaquo;</span>`);
+}
+
 function renderGallery() {
   const grid = $("insignia-grid");
   if (!grid) return;
-  const query   = (($("gallery-search")  || {}).value || "").trim().toLowerCase();
-  const echelon = (($("gallery-echelon") || {}).value || "");
+  const tier  = TIERS[STATE._currentTier] || TIERS.brigade;
+  const query = (($("gallery-search")   || {}).value || "").trim().toLowerCase();
+  const itype = (($("gallery-insignia") || {}).value || tier.defType);
+  const curFile = (tierSelection(STATE._currentTier) || {}).file;
   const filtered = STATE.formations.filter(f => {
-    const matchName    = !query   || f.name.toLowerCase().includes(query);
-    const matchEchelon = !echelon || f.echelon === echelon;
-    return matchName && matchEchelon;
+    if (!tier.echelons.includes(f.echelon)) return false;
+    if (itype && itype !== "All" && (f.insignia_type || "") !== itype) return false;
+    if (query && !f.name.toLowerCase().includes(query)) return false;
+    return true;
   });
   if (!filtered.length) {
-    grid.innerHTML = `<span class="cx-field-hint" style="grid-column:1/-1;">No units match your search.</span>`;
+    grid.innerHTML = `<span class="cx-field-hint" style="grid-column:1/-1;">No ${esc(tier.label)} insignia match your filters.</span>`;
     return;
   }
   grid.innerHTML = filtered.map(f => {
-    const selected = STATE.selectedFormation && STATE.selectedFormation.file === f.file;
+    const selected = curFile && curFile === f.file;
     const badgeCls = f.is_adata ? "cx-badge cx-badge--ok" : "";
     return `
-      <div class="cx-panel cx-panel--2"
+      <div class="cx-panel cx-panel--2 cx-formation-card"
            style="cursor:pointer;text-align:center;padding:var(--space-3);
                   ${selected ? "outline:2px solid var(--connex-gold);outline-offset:2px;" : ""}"
            title="${esc(f.name)}"
@@ -429,55 +514,79 @@ function renderGallery() {
         <div style="font-size:var(--text-xs);color:var(--connex-gray);
                     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;"
              title="${esc(f.name)}">${esc(f.name)}</div>
-        ${badgeCls ? `<span class="${badgeCls}" style="font-size:10px;margin-top:var(--space-1);">ADA</span>` : ""}
+        <div style="margin-top:var(--space-1);">${insigniaBadge(f.insignia_type)}${badgeCls ? ` <span class="${badgeCls}" style="font-size:10px;">ADA</span>` : ""}</div>
       </div>`;
   }).join("");
 }
 
-// Debounce the gallery filter: the search box fires oninput on every keystroke,
-// and renderGallery() rebuilds ~97 insignia cards each time. Coalescing rapid
-// keystrokes into a single re-render (175ms after typing stops) keeps typing
-// smooth on the full formation list. The <select> echelon change also routes
-// here; one extra frame of delay there is imperceptible.
+// Debounce the search box: it fires oninput on every keystroke and the grid can
+// hold hundreds of cards. Coalesce rapid keystrokes into one re-render.
 let _galleryFilterTimer = null;
 window.filterGallery = function() {
   clearTimeout(_galleryFilterTimer);
   _galleryFilterTimer = setTimeout(renderGallery, 175);
 };
 
-window.selectFormation = function(file) {
-  const formation = STATE.formations.find(f => f.file === file);
-  if (!formation) return;
-  STATE.selectedFormation = formation;
-  renderGallery();
+// Reveal + populate the detail panel for a chosen brigade.
+function showDetailPanel(formation) {
   const panel = $("profile-detail-panel");
   if (panel) panel.style.display = "";
   const img   = $("selected-insignia-img");
   const label = $("selected-brigade-label");
-  if (img)   { img.src = `/static/formations/${esc(file)}`; img.alt = esc(formation.name); }
+  if (img)   { img.src = `/static/formations/${esc(formation.file)}`; img.alt = esc(formation.name); }
   if (label)  label.textContent = formation.name;
   const stamp = $("p_stamp");
   if (stamp && !stamp.value) {
     const match = formation.name.match(/\b\d+\w*/);
     stamp.value = match ? match[0].toUpperCase() : formation.name.split(" ")[0].toUpperCase();
   }
-  panel && panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  return panel;
+}
+
+// Pick a patch in the current tier, store it in that tier's slot, and
+// auto-advance to the next tier (Division → Brigade → Battalion).
+window.selectFormation = function(file) {
+  const formation = STATE.formations.find(f => f.file === file);
+  if (!formation) return;
+  const tier = STATE._currentTier;
+  if (tier === "division") {
+    STATE.selectedDivision = formation;
+    switchTier("brigade");
+  } else if (tier === "brigade") {
+    STATE.selectedBrigade   = formation;
+    STATE.selectedFormation = formation;   // legacy alias
+    showDetailPanel(formation);
+    switchTier("battalion");
+    const panel = $("profile-detail-panel");
+    panel && panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } else {
+    STATE.selectedBattalionDUI = formation;
+    renderCascade();
+  }
+  renderBanner();
 };
 
-window.clearBrigadeSelection = function() {
-  STATE.selectedFormation = null;
+// Clear all three tier selections and return to the division tier.
+window.resetCascade = function() {
+  STATE.selectedDivision     = null;
+  STATE.selectedBrigade      = null;
+  STATE.selectedBattalionDUI = null;
+  STATE.selectedFormation    = null;
   const panel = $("profile-detail-panel");
   if (panel) panel.style.display = "none";
-  renderGallery();
+  switchTier("division");
 };
 
 window.saveProfile = async function() {
-  if (!STATE.selectedFormation) {
+  if (!STATE.selectedBrigade) {
     showError("profile-save-error", "Select a brigade insignia first.");
     return;
   }
-  const brigade       = STATE.selectedFormation.name;
-  const brigade_image = STATE.selectedFormation.file;
+  const brigade         = STATE.selectedBrigade.name;
+  const brigade_image   = STATE.selectedBrigade.file;
+  const division        = STATE.selectedDivision ? STATE.selectedDivision.name : "";
+  const division_image  = STATE.selectedDivision ? STATE.selectedDivision.file : "";
+  const battalion_image = STATE.selectedBattalionDUI ? STATE.selectedBattalionDUI.file : "";
   const battalion     = ($("p_battalion") || {}).value || "";
   const battery       = ($("p_battery")   || {}).value || "";
   const uic           = ($("p_uic")       || {}).value || "";
@@ -488,6 +597,7 @@ window.saveProfile = async function() {
   try {
     const data = await api.post("/api/profiles", {
       brigade, brigade_image, battalion, battery, uic,
+      division, division_image, battalion_image,
       default_packed_by: packed_by,
       default_shrh_poc:  shrh_poc,
       stamp_text,
@@ -1420,13 +1530,17 @@ function renderReviewSealStep(center, right) {
       </div>
     </div>`;
 
+  const _railPatch = (file) => file
+    ? `<img src="/static/formations/${esc(file)}" alt="" width="72" height="72"
+            style="object-fit:contain;" onerror="this.style.display='none'">`
+    : "";
   if (right) right.innerHTML = `
     <div class="cx-panel">
-      ${STATE.profile && STATE.profile.brigade_image ? `
-        <img src="/static/formations/${esc(STATE.profile.brigade_image)}"
-             alt="" width="80" height="80"
-             style="display:block;object-fit:contain;margin:0 auto var(--space-4);"
-             onerror="this.style.display='none'">` : ""}
+      ${STATE.profile && (STATE.profile.division_image || STATE.profile.brigade_image) ? `
+        <div style="display:flex;justify-content:center;gap:var(--space-3);margin:0 auto var(--space-4);">
+          ${_railPatch(STATE.profile.division_image)}
+          ${_railPatch(STATE.profile.brigade_image)}
+        </div>` : ""}
       <div class="cx-stamp cx-stamp--rotated" style="margin:0 auto var(--space-4);width:fit-content;">
         ${esc((STATE.profile && STATE.profile.stamp_text) || "UNIT")}
       </div>

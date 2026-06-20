@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.0//EN"
+	"http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd">
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+<svg
+   xmlns="http://www.w3.org/2000/svg"
+   version="1.0"
+   width="258.75"
+   height="180">
+  <path
+     d="M 89.48864,0 L 0,90 L 89.48864,180 L 169.26136,180 L 258.75,90 L 169.26136,0 L 89.48864,0 z"
+     id="rect2221"
+     fill="#3c341f" />
+  <rect
+     width="101.25"
+     height="101.25"
+     x="79.184082"
+     y="-53.154816"
+     transform="matrix(0.7071068,0.7071068,-0.7071068,0.7071068,0,0)"
+     fill="#fff" />
+  <rect
+     width="101.25"
+     height="101.25"
+     x="129.80902"
+     y="-103.77984"
+     transform="matrix(0.7071068,0.7071068,-0.7071068,0.7071068,0,0)"
+     fill="#00f" />
+</svg>
