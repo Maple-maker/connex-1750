@@ -88,6 +88,14 @@ const api = {
     if (!r.ok) throw { status: r.status, message: j.error || r.statusText };
     return j;
   },
+  async del(url) {
+    const r = await fetch(url, { method: "DELETE" });
+    const j = await r.json();
+    // box endpoints signal failures with a machine-readable `code`
+    // (SEALED / BOX_NOT_EMPTY / NOT_FOUND) — surface it for callers.
+    if (!r.ok) throw { status: r.status, code: j.code, message: j.error || j.code || r.statusText };
+    return j;
+  },
   async download(url, body, filename) {
     const r = await fetch(url, {
       method: "POST",
@@ -426,7 +434,16 @@ function renderGallery() {
   }).join("");
 }
 
-window.filterGallery = function() { renderGallery(); };
+// Debounce the gallery filter: the search box fires oninput on every keystroke,
+// and renderGallery() rebuilds ~97 insignia cards each time. Coalescing rapid
+// keystrokes into a single re-render (175ms after typing stops) keeps typing
+// smooth on the full formation list. The <select> echelon change also routes
+// here; one extra frame of delay there is imperceptible.
+let _galleryFilterTimer = null;
+window.filterGallery = function() {
+  clearTimeout(_galleryFilterTimer);
+  _galleryFilterTimer = setTimeout(renderGallery, 175);
+};
 
 window.selectFormation = function(file) {
   const formation = STATE.formations.find(f => f.file === file);
@@ -611,7 +628,7 @@ function renderPackingStep(center, right) {
         <div class="cx-field-wrap">
           <label class="cx-label">Assign to Box</label>
           <select class="cx-field" id="ind_box_num">
-            ${STATE.connex ? STATE.connex.boxes.map(b => `<option value="${b.box_num}">Box ${b.box_num}</option>`).join("") : ""}
+            ${individualBoxOptions()}
           </select>
         </div>
       </div>
@@ -790,21 +807,99 @@ function boxContentLines(b) {
   ].join('') || `<div class="cx-field-hint" style="font-size:var(--text-xs);">No items assigned</div>`;
 }
 
-/* Read-only box list for the Packing page right rail. */
+/* Box list for the Packing page right rail. Editable during packing:
+   each card carries a remove (×) control, and an "+ Add Box" button is
+   appended below. Both are suppressed once the connex is sealed. */
 function renderBoxSummaryCards() {
   if (!STATE.connex) return '<span class="cx-field-hint">No connex loaded.</span>';
-  return STATE.connex.boxes.map(b => {
+  const isSealed = STATE.connex.status === 'sealed';
+  const cards = STATE.connex.boxes.map(b => {
     const [badgeCls, badgeText] = boxBadge(b);
     const title = b.label ? esc(b.label) : `Box ${b.box_num}`;
+    const removeBtn = isSealed
+      ? ''
+      : `<button class="cx-box-remove" title="Remove Box ${b.box_num}"
+                 aria-label="Remove Box ${b.box_num}"
+                 onclick="removeBox(${b.box_num})">&times;</button>`;
     return `<div class="cx-panel cx-panel--2" style="margin-bottom:var(--space-2);">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-2);">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);margin-bottom:var(--space-2);">
         <strong style="color:var(--connex-light);">Box ${b.box_num}${b.label ? ` — ${title}` : ""}</strong>
-        <span class="${badgeCls}">${badgeText}</span>
+        <span style="display:inline-flex;align-items:center;gap:var(--space-2);">
+          <span class="${badgeCls}">${badgeText}</span>
+          ${removeBtn}
+        </span>
       </div>
       <div>${boxContentLines(b)}</div>
     </div>`;
   }).join('');
+  const addBtn = isSealed
+    ? ''
+    : `<button class="cx-btn cx-btn--ghost cx-btn--sm" style="width:100%;margin-top:var(--space-1);"
+               onclick="addBox()">+ Add Box</button>`;
+  return cards + addBtn;
 }
+
+/* Add a box to the open connex. The add endpoint returns the connex object
+   directly (200 → connex). Resync state + re-render so the new box appears in
+   every "Assign to Box" dropdown. */
+window.addBox = async function() {
+  if (!STATE.connex) return;
+  try {
+    const resp = await api.post(`/api/connex/${STATE.connex.connex_id}/boxes`, {});
+    // add returns the connex directly; tolerate a {connex} wrapper too
+    STATE.connex = resp.connex || resp;
+    refreshPackingView();
+  } catch (e) {
+    if (e.status === 409) {
+      showError("packing-advance-error", "Connex is sealed — re-seal to change boxes.");
+    } else {
+      showError("packing-advance-error", "Add box failed: " + e.message);
+    }
+  }
+};
+
+/* Remove a box from the open connex. An empty box deletes cleanly; a populated
+   box 409s with BOX_NOT_EMPTY unless ?force=1 — so we confirm first, then
+   force. The delete endpoint returns {ok, connex}. Box numbers are NOT
+   renumbered server-side, so dropdowns stay stable. */
+window.removeBox = async function(boxNum) {
+  if (!STATE.connex) return;
+  const box = STATE.connex.boxes.find(b => b.box_num === boxNum);
+  const hasItems = box && ((box.bom_ids && box.bom_ids.length) || (box.individual_items && box.individual_items.length));
+  let force = false;
+  if (hasItems) {
+    if (!confirm(`Box ${boxNum} has items — remove anyway? Its assignments will be cleared.`)) return;
+    force = true;
+  }
+  const url = `/api/connex/${STATE.connex.connex_id}/boxes/${boxNum}${force ? "?force=1" : ""}`;
+  try {
+    const resp = await api.del(url);
+    // delete returns {ok, connex}; tolerate a bare connex too
+    STATE.connex = resp.connex || resp;
+    refreshPackingView();
+  } catch (e) {
+    if (e.code === "BOX_NOT_EMPTY") {
+      // Race: box gained items since render (or we sent a non-force DELETE).
+      // Re-confirm and force.
+      if (confirm(`Box ${boxNum} is not empty — remove anyway?`)) {
+        try {
+          const resp = await api.del(`/api/connex/${STATE.connex.connex_id}/boxes/${boxNum}?force=1`);
+          STATE.connex = resp.connex || resp;
+          refreshPackingView();
+        } catch (e2) {
+          showError("packing-advance-error", "Remove box failed: " + e2.message);
+        }
+      }
+    } else if (e.code === "SEALED") {
+      showError("packing-advance-error", "Connex is sealed — re-seal to change boxes.");
+    } else if (e.code === "NOT_FOUND" || e.status === 404) {
+      // Already gone — just resync the view.
+      refreshPackingView();
+    } else {
+      showError("packing-advance-error", "Remove box failed: " + e.message);
+    }
+  }
+};
 
 /* Editable box cards for the Box Status page: custom label + SLOC + SHRH POC. */
 function renderBoxStatusCards() {
@@ -1037,6 +1132,15 @@ function bomAssignedBox(bom) {
   return null;
 }
 
+/* <option> list for the individual-item box picker. Shared by the initial
+   render and refreshPackingView so it stays in sync after add/remove box. */
+function individualBoxOptions() {
+  if (!STATE.connex) return "";
+  return STATE.connex.boxes
+    .map(b => `<option value="${b.box_num}">Box ${b.box_num}</option>`)
+    .join("");
+}
+
 function refreshPackingView() {
   const tbody = $("bom-table-body");
   if (tbody && STATE.boms.length) tbody.innerHTML = renderBomTableRows();
@@ -1044,6 +1148,17 @@ function refreshPackingView() {
   if (boxes) boxes.innerHTML = renderBoxSummaryCards();
   const prog = $("packing-progress");
   if (prog) prog.innerHTML = renderPackingProgress();
+  // Keep the individual-item box picker in sync with the live box list
+  // (it lives in the center panel and isn't part of the table rebuild).
+  const indSel = $("ind_box_num");
+  if (indSel) {
+    const prev = indSel.value;
+    indSel.innerHTML = individualBoxOptions();
+    // Preserve selection if that box still exists; else fall back to first.
+    if (prev && STATE.connex && STATE.connex.boxes.some(b => String(b.box_num) === prev)) {
+      indSel.value = prev;
+    }
+  }
 }
 
 /* Re-render the Box Status page in place (cards + audit + progress). */
@@ -1101,7 +1216,7 @@ function renderAuditFlagsHtml() {
 function renderBoxStatusStep(center, right) {
   center.innerHTML = `
     <div class="cx-panel" style="margin-bottom:var(--space-3);">
-      <h2 class="cx-panel__title">Box Status</h2>
+      <h2 class="cx-panel__title">4 &middot; Box Status</h2>
       <p class="cx-field-hint">Label and organize each box, apply its SLOC and SHRH POC, and review the audit before sealing.</p>
     </div>
 
@@ -1134,20 +1249,20 @@ function renderBoxStatusStep(center, right) {
 }
 
 /* =========================================================
- * STEP 4 — SEAL_DATA
+ * STEP 5 — SEAL_DATA
  * ========================================================= */
 function renderSealDataStep(center, right) {
   const c = STATE.connex || {};
   center.innerHTML = `
     <div class="cx-panel">
-      <h2 class="cx-panel__title">4 &middot; Seal Data</h2>
-      <p class="cx-field-hint">Enter identifiers. SUN, CONNEX #, and SEAL # may be left blank — a placeholder prints on the PDF.</p>
+      <h2 class="cx-panel__title">5 &middot; Seal Data</h2>
+      <p class="cx-field-hint">Enter identifiers. SUN, Connex Serial Number, and SEAL # may be left blank — a placeholder prints on the PDF.</p>
       <div class="cx-field-wrap">
         <label class="cx-label">SUN # ${buildHelpPopover("SUN #")}</label>
         <input class="cx-field cx-field--mono" id="sd_sun" value="${esc(c.sun || "")}" placeholder="SUN-2026-001 (optional)">
       </div>
       <div class="cx-field-wrap">
-        <label class="cx-label">CONNEX # ${buildHelpPopover("CONNEX #")}</label>
+        <label class="cx-label">Connex Serial Number ${buildHelpPopover("CONNEX SERIAL NUMBER")}</label>
         <input class="cx-field cx-field--mono" id="sd_connex_no" value="${esc(c.connex_no || "")}" placeholder="CONNEX-01 (optional)">
         <span class="cx-field-hint">Pre-filled from setup. Update if the number changed.</span>
       </div>
@@ -1247,7 +1362,7 @@ function renderSealErrors(errors) {
 }
 
 /* =========================================================
- * STEP 5 — REVIEW_SEAL
+ * STEP 6 — REVIEW_SEAL
  * Audit flags + box checklist (no 3D)
  * ========================================================= */
 function renderReviewSealStep(center, right) {
@@ -1279,7 +1394,7 @@ function renderReviewSealStep(center, right) {
 
   center.innerHTML = `
     <div class="cx-panel" style="margin-bottom:var(--space-3);">
-      <h2 class="cx-panel__title">5 &middot; Review &amp; Seal</h2>
+      <h2 class="cx-panel__title">6 &middot; Review &amp; Seal</h2>
       <p class="cx-field-hint">Audit your connex before sealing. Resolve all errors; warnings are advisory.</p>
     </div>
 
@@ -1695,6 +1810,17 @@ window.navigateToAuditTarget = function(action, boxNum) {
 /* =========================================================
  * toggleHelp
  * ========================================================= */
+/* Reset ONLY the positioning props that toggleHelp adds inline when opening.
+   We must NOT use cssText="" here: buildHelpPopover() bakes max-width /
+   max-height:70vh / overflow-y:auto into the popover's static inline style so
+   tall popovers scroll. Wiping cssText would strip those permanently, so a
+   re-opened tall popover (CONNEX#, SEAL# photo popovers) would no longer
+   scroll. Clearing individual properties leaves the static inline style intact. */
+function resetHelpPopoverPosition(p) {
+  ["position", "width", "left", "right", "top", "bottom", "transform"]
+    .forEach(prop => p.style.removeProperty(prop));
+}
+
 window.toggleHelp = function(triggerBtn) {
   const help    = triggerBtn.closest(".cx-help");
   const popover = help && help.querySelector(".cx-help__popover");
@@ -1702,7 +1828,7 @@ window.toggleHelp = function(triggerBtn) {
   const isOpen = popover.classList.contains("cx-help__popover--open");
   $$(".cx-help__popover--open").forEach(p => {
     p.classList.remove("cx-help__popover--open");
-    p.style.cssText = "";
+    resetHelpPopoverPosition(p);
   });
   if (!isOpen) {
     popover.classList.add("cx-help__popover--open");
@@ -1734,7 +1860,7 @@ window.toggleHelp = function(triggerBtn) {
     const close = (e) => {
       if (!help.contains(e.target)) {
         popover.classList.remove("cx-help__popover--open");
-        popover.style.cssText = "";
+        resetHelpPopoverPosition(popover);
         document.removeEventListener("click", close);
       }
     };
@@ -1744,7 +1870,10 @@ window.toggleHelp = function(triggerBtn) {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape")
-    $$(".cx-help__popover--open").forEach(p => p.classList.remove("cx-help__popover--open"));
+    $$(".cx-help__popover--open").forEach(p => {
+      p.classList.remove("cx-help__popover--open");
+      resetHelpPopoverPosition(p);
+    });
 });
 
 /* =========================================================

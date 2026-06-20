@@ -487,6 +487,7 @@ def build_connex_header(
     box_nums_label: str,
     profile: dict = None,
     include_seal: bool = False,
+    major_end_items: int | None = None,
 ) -> "HeaderInfo":
     """
     Build a HeaderInfo for a single-box DD1750 from a Connex + Box dict.
@@ -501,6 +502,10 @@ def build_connex_header(
         box_count:     Total box count for the "1. NO. BOXES" field.
         box_nums_label: Range-compressed box list string, e.g. "1-5".
         profile:       Optional Profile dict for stamp_text / battalion fields.
+        major_end_items: Count for the "MAJOR END ITEMS: (N)" line. Per box this
+                       is (#BOMs in box)+(#non-blank individual items); for the
+                       master it is the sum over all boxes. Defaults to box_count
+                       when omitted so legacy callers keep working.
 
     Returns:
         A fully populated HeaderInfo ready to pass to generate_dd1750_from_items
@@ -551,7 +556,8 @@ def build_connex_header(
     end_lines.append(f"SUN: {sun}")
     if include_seal:
         end_lines.append(f"SEAL: {seal}")
-    end_lines.append(f"MAJOR END ITEMS: ({box_count})")
+    mei = box_count if major_end_items is None else major_end_items
+    end_lines.append(f"MAJOR END ITEMS: ({mei})")
     if box_nums_label:
         end_lines.append(f"BOX #S: {box_nums_label}")
 

@@ -197,6 +197,70 @@ def apply_bom_assignments(connex_id: str, bom_ids_by_box: dict[int, list[str]]) 
 
 
 # ---------------------------------------------------------------------------
+# Box add / remove
+# ---------------------------------------------------------------------------
+
+def add_box(connex_id: str) -> dict | None:
+    """
+    Append a new empty box to the connex.
+
+    The new box_num is max(existing box_num) + 1 (1 if there are no boxes), so
+    numbering stays stable even after removals.  box_count is set to the new box
+    count.  Returns the updated connex, or None if not found.
+    """
+    connex = load_connex(connex_id)
+    if connex is None:
+        return None
+
+    boxes = connex.get("boxes", [])
+    next_num = (max((b["box_num"] for b in boxes), default=0)) + 1
+    boxes.append(_empty_box(next_num))
+    connex["boxes"] = boxes
+    connex["box_count"] = len(boxes)
+
+    recompute_box_completeness(connex)
+    _atomic_write(_connex_path(connex_id), connex)
+    return connex
+
+
+def remove_box(connex_id: str, box_num: int, force: bool = False) -> dict:
+    """
+    Remove the box with the given box_num.
+
+    If the target box has content (any bom_ids or any non-empty individual_items)
+    and force is False, the removal is rejected and the connex is left unchanged.
+
+    Remaining boxes keep their box_num (no renumbering).  box_count becomes the
+    new len(boxes).
+
+    Returns:
+        {"ok": False, "error": str}                  — not found / not present / rejected
+        {"ok": True,  "connex": dict}                — removed
+    """
+    connex = load_connex(connex_id)
+    if connex is None:
+        return {"ok": False, "error": f"Connex '{connex_id}' not found."}
+
+    boxes = connex.get("boxes", [])
+    target = next((b for b in boxes if b["box_num"] == box_num), None)
+    if target is None:
+        return {"ok": False, "error": f"Box {box_num} does not exist."}
+
+    if _box_has_content(target) and not force:
+        return {
+            "ok": False,
+            "error": f"Box {box_num} has contents — pass force to remove it anyway.",
+        }
+
+    connex["boxes"] = [b for b in boxes if b["box_num"] != box_num]
+    connex["box_count"] = len(connex["boxes"])
+
+    recompute_box_completeness(connex)
+    _atomic_write(_connex_path(connex_id), connex)
+    return {"ok": True, "connex": connex}
+
+
+# ---------------------------------------------------------------------------
 # Contract B — Seal validation
 # ---------------------------------------------------------------------------
 
@@ -299,6 +363,8 @@ __all__ = [
     "patch_connex",
     "attach_ingest_job",
     "apply_bom_assignments",
+    "add_box",
+    "remove_box",
     "validate_seal",
     "seal_connex",
     "recompute_box_completeness",

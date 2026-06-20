@@ -20,6 +20,12 @@ export const GLOSSARY = {
     img: "/static/help/connex-location.jpg",
     caption: "The container number (e.g. SBIU 208788) is stencilled on the connex door and side.",
   },
+  "CONNEX SERIAL NUMBER": {
+    term: "Connex Serial Number",
+    copy: "The container's identifying number. Leave blank to print a placeholder.",
+    img: "/static/help/connex-location.jpg",
+    caption: "The container number (e.g. SBIU 208788) is stencilled on the connex door and side.",
+  },
   "SEAL #": {
     term: "SEAL #",
     copy: "The numbered security seal on the connex doors. Leave blank to print a placeholder.",

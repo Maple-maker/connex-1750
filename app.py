@@ -22,6 +22,7 @@ import os
 import re
 import tempfile
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from collections import Counter
 from datetime import datetime
 from uuid import uuid4
@@ -293,6 +294,21 @@ def _representative_box(bom: dict, box_map: dict) -> int | None:
     return None
 
 
+def _box_major_end_items(box: dict) -> int:
+    """
+    Major end items in a single box = (# BOMs in the box) + (# non-blank
+    individual items).  One ingested BOM = one major end item regardless of how
+    many component rows it explodes into.  Individual items with no description
+    are placeholder rows and don't count.
+    """
+    bom_count = len(box.get("bom_ids", []))
+    indiv_count = len([
+        i for i in box.get("individual_items", [])
+        if (i.get("description") or "").strip()
+    ])
+    return bom_count + indiv_count
+
+
 # ---------------------------------------------------------------------------
 # POST /ingest — upload BOMs (PDFs) + optional SHR PDF; create a job
 # ---------------------------------------------------------------------------
@@ -316,18 +332,45 @@ def ingest():
     shr_dict = None
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        # --- Ingest each BOM PDF ---
-        for f in bom_files:
+        # --- Stage every BOM PDF to disk first (cheap, sequential I/O) -------
+        # We persist all uploads before extracting so the heavy extraction step
+        # can run in parallel. Each entry is (disk_path, nomenclature) and the
+        # list order matches the upload order, which we must preserve in output.
+        staged = []  # list of (disk_path, nomenclature)
+        for idx, f in enumerate(bom_files):
             if not f or not f.filename:
                 continue
             fname = f.filename
             safe = secure_filename(fname) or "bom.pdf"
-            disk_path = os.path.join(tmpdir, safe)
+            # Two uploads can collapse to the same secure_filename (or be
+            # literally identical names); prefix with the index to keep every
+            # staged path unique so files don't clobber each other on disk.
+            disk_path = os.path.join(tmpdir, f"{idx}_{safe}")
             f.save(disk_path)
             # Use the filename stem (no extension) as the nomenclature label.
             nomenclature = os.path.splitext(fname)[0]
-            bom = bom_ingest.ingest_bom(disk_path, nomenclature=nomenclature)
-            boms.append(bom)
+            staged.append((disk_path, nomenclature))
+
+        # --- Ingest BOMs in parallel ----------------------------------------
+        # ingest_bom is self-contained (each call reads one distinct file, holds
+        # no shared state, and never raises — it catches internally), so it is
+        # safe to run across threads. pdf2image/tesseract release the GIL during
+        # native work, so OCR-heavy BOMs overlap instead of serializing.
+        # executor.map preserves input order, so `boms` stays aligned with the
+        # upload order. The pool is capped at 4 to bound peak memory (each OCR
+        # page render can be large). A single BOM skips the pool entirely.
+        if len(staged) > 1:
+            max_workers = min(4, len(staged))
+            with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                boms = list(ex.map(
+                    lambda args: bom_ingest.ingest_bom(args[0], nomenclature=args[1]),
+                    staged,
+                ))
+        else:
+            boms = [
+                bom_ingest.ingest_bom(path, nomenclature=nom)
+                for path, nom in staged
+            ]
 
         if not boms:
             return jsonify({"error": "No valid PDF BOM files found."}), 400
@@ -373,6 +416,9 @@ def ingest():
             "lin":            bom.get("lin", ""),
             "end_item_niin":  bom.get("end_item_niin", ""),
             "serial_number":  bom.get("serial_number", ""),
+            "lin_source":     bom.get("lin_source", ""),
+            "serial_source":  bom.get("serial_source", ""),
+            "niin_source":    bom.get("niin_source", ""),
             "item_count":     bom.get("item_count", 0),
             "box_num":        rep_box,
             "zero_on_hand":   bom.get("zero_on_hand", False),
@@ -1032,6 +1078,58 @@ def api_attach_connex(connex_id):
     return jsonify({"connex": connex})
 
 
+@app.route("/api/connex/<connex_id>/boxes", methods=["POST"])
+def api_add_connex_box(connex_id):
+    """
+    POST /api/connex/<connex_id>/boxes
+    Append a new empty box.  Blocked on a sealed connex.
+    -> {connex: Connex}
+    """
+    connex = _connex_store.load_connex(connex_id)
+    if connex is None:
+        return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
+    if connex.get("status") == "sealed":
+        return jsonify({
+            "error": "Connex is sealed — boxes are locked. Unseal before making changes.",
+            "code": "SEALED",
+        }), 409
+
+    updated = _connex_store.add_box(connex_id)
+    if updated is None:
+        return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
+    return jsonify({"connex": updated})
+
+
+@app.route("/api/connex/<connex_id>/boxes/<int:box_num>", methods=["DELETE"])
+def api_remove_connex_box(connex_id, box_num):
+    """
+    DELETE /api/connex/<connex_id>/boxes/<box_num>  (optional ?force=1)
+    Remove a box.  A box with contents is rejected unless force is set.
+    Remaining boxes keep their box_num.  Blocked on a sealed connex.
+    -> {connex: Connex}
+    """
+    connex = _connex_store.load_connex(connex_id)
+    if connex is None:
+        return jsonify({"error": f"Connex '{connex_id}' not found.", "code": "NOT_FOUND"}), 404
+    if connex.get("status") == "sealed":
+        return jsonify({
+            "error": "Connex is sealed — boxes are locked. Unseal before making changes.",
+            "code": "SEALED",
+        }), 409
+
+    force = request.args.get("force") in ("1", "true", "yes")
+    result = _connex_store.remove_box(connex_id, box_num, force=force)
+    if not result["ok"]:
+        error = result["error"]
+        if "does not exist" in error:
+            return jsonify({"error": error, "code": "NOT_FOUND"}), 404
+        if "not found" in error:
+            return jsonify({"error": error, "code": "NOT_FOUND"}), 404
+        # Has contents and force not set.
+        return jsonify({"error": error, "code": "BOX_NOT_EMPTY"}), 409
+    return jsonify({"connex": result["connex"]})
+
+
 @app.route("/api/connex/<connex_id>/assign", methods=["POST"])
 def api_assign_connex(connex_id):
     """
@@ -1064,7 +1162,10 @@ def api_assign_connex(connex_id):
     boms = job["boms"]
     box_map = job["box_map"]
     assigned_bom_ids: set = job.setdefault("assigned_bom_ids", set())
-    box_count = connex.get("box_count", len(connex.get("boxes", [])))
+    # Valid assignment targets are the actual box_nums on the connex (boxes can
+    # be removed without renumbering, so a stale box_count is unreliable).
+    valid_box_nums = {b["box_num"] for b in connex.get("boxes", [])}
+    box_count = len(valid_box_nums)
 
     warnings: list[str] = []
 
@@ -1077,7 +1178,7 @@ def api_assign_connex(connex_id):
             if target_box is None:
                 continue
             target_box = int(target_box)
-            if target_box < 1 or target_box > box_count:
+            if target_box not in valid_box_nums:
                 warnings.append(
                     f"item {move['item_key']!r} targets box {target_box} which is "
                     f"out of range (connex has {box_count} boxes) — skipped"
@@ -1116,8 +1217,8 @@ def api_assign_connex(connex_id):
             continue
         target_box = int(target_box)
 
-        # Warn if the target box number is outside the connex range.
-        if target_box < 1 or target_box > box_count:
+        # Warn if the target box number is not an actual box on the connex.
+        if target_box not in valid_box_nums:
             warnings.append(
                 f"bom_id {bom_id!r} targets box {target_box} which is out of range "
                 f"(connex has {box_count} boxes) — skipped"
@@ -1203,8 +1304,10 @@ def _connex_pdfs_into_zip(connex_id: str, zf: "zipfile.ZipFile", folder: str, tm
     if master_rows:
         condensed        = master_core.condense_master_rows(master_rows)
         master_bom_items = master_core.rows_to_bom_items(condensed)
+        master_mei       = sum(_box_major_end_items(b) for b in connex.get("boxes", []))
         master_hdr       = render_core.build_connex_header(
-            connex, {}, connex.get("box_count", 1), "ALL", profile or None, include_seal=True,
+            connex, {}, connex.get("box_count", 1), "ALL", profile or None,
+            include_seal=True, major_end_items=master_mei,
         )
         master_fd, master_path = tempfile.mkstemp(suffix=".pdf", dir=tmpdir)
         os.close(master_fd)
@@ -1258,6 +1361,7 @@ def _connex_pdfs_into_zip(connex_id: str, zf: "zipfile.ZipFile", folder: str, tm
 
         hdr = render_core.build_connex_header(
             connex, box, connex.get("box_count", 1), str(box_num), profile or None,
+            major_end_items=_box_major_end_items(box),
         )
         out_fd, out_path = tempfile.mkstemp(suffix=".pdf", dir=tmpdir)
         os.close(out_fd)
@@ -1335,6 +1439,9 @@ def api_generate_connex(connex_id):
 
                 # Use a synthetic "all-boxes" header: sloc/shrh blank on the master
                 # (it spans all boxes), stamp from the profile.
+                master_mei = sum(
+                    _box_major_end_items(b) for b in connex.get("boxes", [])
+                )
                 master_hdr = render_core.build_connex_header(
                     connex,
                     {},                         # no single box — master spans all
@@ -1342,6 +1449,7 @@ def api_generate_connex(connex_id):
                     "ALL",                      # box_nums_label for the master
                     profile or None,
                     include_seal=True,
+                    major_end_items=master_mei,
                 )
 
                 master_fd, master_path = tempfile.mkstemp(suffix=".pdf", dir=tmpdir)
@@ -1414,6 +1522,7 @@ def api_generate_connex(connex_id):
                     connex.get("box_count", 1),
                     str(box_num),
                     profile or None,
+                    major_end_items=_box_major_end_items(box),
                 )
 
                 out_fd, out_path = tempfile.mkstemp(suffix=".pdf", dir=tmpdir)

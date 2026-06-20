@@ -39,6 +39,18 @@ except Exception:
     _pytesseract = None
     _OCR_Output = None
 
+# OCR render resolution (DPI). OCR cost scales with pixel count ≈ DPI², so this
+# is the single biggest lever on OCR speed. Lowered 250 -> 200 as a conservative
+# performance win: (200/250)² ≈ 0.64, i.e. ~36% less render + OCR work per page,
+# while staying well inside the resolution band where Tesseract reads the 8-10pt
+# table text reliably. Both OCR passes (item extraction and the header-band
+# metadata pass) use proportional / relative positioning — column and row windows
+# are computed from the actual image dimensions, not absolute pixel constants —
+# so the modest DPI drop does not move any extraction threshold. Defined as one
+# named constant so the speed/accuracy tradeoff lives in exactly one place; raise
+# it back toward 250 if scanned-BOM accuracy ever regresses.
+OCR_DPI = 200
+
 
 # DD1750 Form Layout Constants (Letter size: 612 x 792 points)
 # These measurements are from the official DD FORM 1750, SEP 70 (EG)
@@ -738,6 +750,19 @@ def extract_items_da2062(tables: List[List[List[str]]], page_text: str) -> List[
     return items
 
 
+def _normalize_niin(raw: str) -> str:
+    """
+    Coerce an OCR'd NIIN capture back to 9 pure digits.
+
+    Tesseract routinely confuses these glyphs in a numeric NIIN:
+        O -> 0,  I -> 1,  l -> 1
+    The NIIN is defined as 9 digits, so once we've matched at the labelled
+    position any letter in that slot is a known confusable and is safe to map.
+    """
+    table = {'O': '0', 'o': '0', 'I': '1', 'l': '1'}
+    return ''.join(table.get(c, c) for c in raw)
+
+
 def extract_metadata(page_text: str) -> BomMetadata:
     """
     Extract metadata from BOM header text.
@@ -749,16 +774,21 @@ def extract_metadata(page_text: str) -> BomMetadata:
         BomMetadata object with extracted values
     """
     metadata = BomMetadata()
-    
-    # END ITEM NIIN
-    match = re.search(r'END\s*ITEM\s*NIIN[:\s]*(\d{9})', page_text, re.IGNORECASE)
+
+    # END ITEM NIIN — exactly 9 chars. On OCR'd headers tesseract frequently
+    # misreads zeros as the letter O and ones as I/l, so we accept those
+    # confusable letters in the capture and normalize them back to digits.
+    # (Clean digital text still matches — [0-9OIl] is a superset of [0-9].)
+    match = re.search(r'END\s*ITEM\s*NIIN[:\s]*([0-9OIl]{9})', page_text, re.IGNORECASE)
     if match:
-        metadata.end_item_niin = match.group(1)
-    
-    # LIN
-    match = re.search(r'LIN[:\s]*([A-Z0-9]+)', page_text, re.IGNORECASE)
+        metadata.end_item_niin = _normalize_niin(match.group(1))
+
+    # LIN — bounded to exactly 6 alphanumerics (the real LIN width). The old
+    # unbounded [A-Z0-9]+ greedily swallowed adjacent header text (e.g. a LIN
+    # glued to the next column). \b stops the match at the field boundary.
+    match = re.search(r'LIN[:\s]*([A-Z0-9]{6})\b', page_text, re.IGNORECASE)
     if match:
-        metadata.lin = match.group(1)
+        metadata.lin = match.group(1).upper()
     
     # End-Item Description (the DESC that comes after LIN:, not the unit DESC)
     # The BOM header has two DESC fields:
@@ -766,7 +796,7 @@ def extract_metadata(page_text: str) -> BomMetadata:
     #   "END ITEM NIIN: ... LIN: ... DESC: <model>"   (this is the one)
     # Anchor on the LIN: prefix to grab the right one. Stop at newline.
     match = re.search(
-        r'LIN[:\s]*[A-Z0-9]+\s+DESC[:\s]*([^\n\r]+)',
+        r'LIN[:\s]*[A-Z0-9]{6}\s+DESC[:\s]*([^\n\r]+)',
         page_text, re.IGNORECASE,
     )
     if match:
@@ -864,7 +894,156 @@ def extract_metadata_from_form_fields(pdf_path: str, metadata: BomMetadata) -> B
     return metadata
 
 
-def extract_items_via_ocr(pdf_path: str, dpi: int = 250) -> List[BomItem]:
+def extract_metadata_via_ocr_header(pdf_path: str, metadata: BomMetadata,
+                                    dpi: int = OCR_DPI) -> BomMetadata:
+    """
+    Recover end-item identifiers from the printed header band of an image-only BOM.
+
+    GCSS-Army Component Listings / Hand Receipts that are pure scans carry the
+    end-item NIIN, LIN, serial and description in a labelled header band across
+    the top of page 1.  Plain text extraction sees nothing and the form fields
+    don't carry the NIIN, so without this pass the app leans on the filename —
+    but the NIIN is NOT in the filename and MUST come from the paperwork.
+
+    Strategy:
+      1. Crop the top ~15% of page 1 (the header band).
+      2. OCR it positionally with image_to_data to get every word + its X box.
+      3. For each label (END ITEM NIIN / LIN / SER-EQUIP NO / DESC / UIC), find
+         the label token(s) and read the value token(s) immediately to its RIGHT
+         on the same line (next-higher X, similar Y).
+      4. Only fill metadata fields that are still empty — never override a value
+         text/form-field extraction already produced.
+
+    Fully guarded by OCR_AVAILABLE, and every OCR call is wrapped so a missing
+    tesseract binary degrades to a no-op instead of raising.
+
+    Args:
+        pdf_path: Path to the BOM PDF
+        metadata: Existing metadata (mutated and returned)
+        dpi:      Render DPI (matches extract_items_via_ocr)
+
+    Returns:
+        The same BomMetadata, with empty header fields populated when found.
+    """
+    if not OCR_AVAILABLE:
+        return metadata
+
+    # Nothing to do if every header field we can recover is already set.
+    if (metadata.end_item_niin and metadata.lin
+            and metadata.serial_equip_no and metadata.end_item_description):
+        return metadata
+
+    try:
+        images = _convert_from_path(pdf_path, dpi=dpi, first_page=1, last_page=1)
+    except Exception:
+        return metadata
+    if not images:
+        return metadata
+
+    img = images[0]
+    img_w, img_h = img.size
+    band = img.crop((0, 0, img_w, int(img_h * 0.15)))
+
+    try:
+        data = _pytesseract.image_to_data(
+            band, output_type=_OCR_Output.DICT, config='--psm 6',
+        )
+    except Exception:
+        # Missing binary / OCR failure — degrade gracefully.
+        return metadata
+
+    # Build a flat list of words with positions.
+    words = []
+    for i, txt in enumerate(data['text']):
+        t = (txt or '').strip()
+        if not t:
+            continue
+        words.append({
+            'text': t,
+            'x':    data['left'][i],
+            'y':    data['top'][i],
+            'w':    data['width'][i],
+            'h':    data['height'][i],
+            'line': (data.get('block_num', [0])[i], data.get('par_num', [0])[i],
+                     data.get('line_num', [0])[i]),
+        })
+
+    def values_right_of(label_words, max_gap_frac=0.45, same_line_tol=None):
+        """
+        Find the run of value tokens to the RIGHT of a multi-word label.
+        `label_words` is the uppercased label split into tokens (e.g.
+        ['END','ITEM','NIIN']). Returns the joined value string or ''.
+        """
+        n = len(label_words)
+        for idx in range(len(words) - n + 1):
+            window = words[idx:idx + n]
+            if [w['text'].upper().strip(':') for w in window] != label_words:
+                continue
+            last = window[-1]
+            ytol = same_line_tol if same_line_tol is not None else last['h'] * 0.8
+            label_right = last['x'] + last['w']
+            gap_limit = label_right + int(img_w * max_gap_frac)
+            vals = []
+            for w in words:
+                if w['x'] <= label_right:
+                    continue
+                if w['x'] > gap_limit:
+                    continue
+                if abs(w['y'] - last['y']) > ytol:
+                    continue
+                vals.append(w)
+            vals.sort(key=lambda w: w['x'])
+            # Stop the value run at the next label-looking token (ends with ':').
+            out_tokens = []
+            for w in vals:
+                tok = w['text'].strip(':')
+                if w['text'].endswith(':') and out_tokens:
+                    break
+                out_tokens.append(tok)
+            return ' '.join(out_tokens).strip()
+        return ''
+
+    # --- NIIN: label "END ITEM NIIN", value is 9 confusable-digits -----------
+    if not metadata.end_item_niin:
+        raw = values_right_of(['END', 'ITEM', 'NIIN'])
+        m = re.search(r'([0-9OIl]{9})', raw)
+        if m:
+            metadata.end_item_niin = _normalize_niin(m.group(1))
+
+    # --- LIN: label "LIN", value is 6 alphanumerics --------------------------
+    if not metadata.lin:
+        raw = values_right_of(['LIN'])
+        m = re.search(r'([A-Z0-9]{6})', raw.upper())
+        if m:
+            metadata.lin = m.group(1)
+
+    # --- DESC: label "DESC", value is free text ------------------------------
+    if not metadata.end_item_description:
+        raw = values_right_of(['DESC'])
+        if raw:
+            metadata.end_item_description = raw[:50]
+
+    # --- Serial: label "SER/EQUIP NO" (often handwritten — best effort) ------
+    if not metadata.serial_equip_no:
+        # The slash may OCR as one or several tokens; try a couple of splits.
+        for label in (['SER/EQUIP', 'NO'], ['SER', 'EQUIP', 'NO']):
+            raw = values_right_of(label)
+            m = re.search(r'([A-Z0-9]{4,})', raw.upper())
+            if m:
+                metadata.serial_equip_no = m.group(1)
+                break
+
+    # --- UIC: label "UIC" ----------------------------------------------------
+    if not metadata.uic:
+        raw = values_right_of(['UIC'])
+        m = re.search(r'([A-Z0-9]{5,6})', raw.upper())
+        if m:
+            metadata.uic = m.group(1)
+
+    return metadata
+
+
+def extract_items_via_ocr(pdf_path: str, dpi: int = OCR_DPI) -> List[BomItem]:
     """
     Extract BOM items by running OCR on every page.
     
@@ -1326,7 +1505,18 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> ExtractionResu
             # If page text is empty (form-only PDF), fill in metadata from form fields
             if not has_text:
                 result.metadata = extract_metadata_from_form_fields(pdf_path, result.metadata)
-            
+                # Image-only BOMs carry the end-item NIIN / LIN / serial / desc
+                # only in the printed header band — not in text and not in form
+                # fields. Recover them positionally from the header image so the
+                # NIIN (which is NOT in the filename) comes from the paperwork.
+                # Guarded by OCR_AVAILABLE; a no-op if tesseract is missing.
+                if OCR_AVAILABLE:
+                    try:
+                        result.metadata = extract_metadata_via_ocr_header(
+                            pdf_path, result.metadata)
+                    except Exception as e:
+                        result.warnings.append(f"Header OCR metadata pass failed: {e}")
+
             result.metadata.bom_format = result.format_detected
             
             # Extract items from all pages

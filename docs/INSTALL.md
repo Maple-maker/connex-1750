@@ -108,16 +108,18 @@ All tests must pass (73 legacy + 59 new = 132+ total). If any test fails, do not
 
 ---
 
-## 8. Verify the 3D review module
+## 8. Verify the seal animation
 
-The three.js scene is used only at Step 5 (Review & Seal). Verify it with the isolated harness:
+Step 5 (Review & Seal) plays a pure-CSS seal animation when "Apply Stamp & Seal" is
+clicked — no three.js, no WebGL. Verify it in the running app:
 
-1. Start the server (`python3 app.py`).
-2. Open http://localhost:8000/static/connex3d/_harness.html
-3. Click "openConnex()" → doors swing open.
-4. Click "setBoxCount(8)" → 8 boxes appear inside.
+1. Start the server (`python3 app.py`) and open http://localhost:8000.
+2. Run a connex through to Step 5 and click "Apply Brigade Stamp & Seal".
+3. A full-screen overlay appears: connex doors swing closed, a gold lock bar slides
+   across the seam, and a `SEALED` stamp lands. The ZIP downloads when it finishes.
 
-If the harness shows a WebGL error, the browser lacks WebGL support. Step 5 in the main app automatically falls back to the per-box checklist view — the workflow still completes without 3D.
+If the OS has "reduce motion" enabled, a scoped fallback fades the overlay and stamp
+in without the door swing (see `docs/handoff/3d-connex.md`).
 
 **Note on insignia assets:** The brigade gallery (Step 1) contains 97 formation insignia. Assets are downscaled for fast loading on constrained networks and lazy-load in the gallery view. On a slow connection the gallery may take a few seconds to populate; the app is fully functional once the profile is saved.
 

@@ -29,14 +29,6 @@
     margin: 0 0 var(--space-3);
   }
 
-  /* Popover open state — toggled by toggleHelp() in app.js.
-     The base .cx-help__popover is hidden with opacity:0 + pointer-events:none
-     (not display:none), so we must un-hide it the same way or it never shows. */
-  .cx-help__popover--open {
-    opacity: 1 !important;
-    pointer-events: auto !important;
-  }
-
   /* Rail scroll */
   .cx-rail-left,
   .cx-rail-right {
@@ -255,6 +247,12 @@
      TOP — Unit banner (driven by app.js: renderBanner())
      ============================================================ -->
 <header class="cx-banner">
+  <!-- Permanent product wordmark — lives OUTSIDE #cx-banner so renderBanner()
+       (which rewrites only #cx-banner) never clobbers it. Always visible. -->
+  <div class="cx-wordmark">
+    <span class="cx-wordmark__full">Container Readiness &amp; Accountability Tracking Engine</span>
+    <span class="cx-wordmark__acro">C.R.A.T.E.</span>
+  </div>
   <!-- renderBanner() rewrites ONLY #cx-banner so the chrome below survives -->
   <div id="cx-banner" class="cx-banner__content">
     <span class="cx-banner__emblem">&#x1F4E6;</span>

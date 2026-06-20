@@ -10,13 +10,13 @@
 
 | File | Status | Notes |
 |------|--------|-------|
-| `templates/index.html` | REPLACED | 3-column .cx-layout shell; three.js importmap; legacy 2D flow preserved in `<details>`; split-screen CSS; no persistent 3D canvas at load; tutorial overlay + header button |
-| `static/app.js` | REPLACED | 6-step ES-module state machine; 2D split-screen PACKING; 3D ONLY in REVIEW_SEAL; all Contract A calls; tutorial carousel |
+| `templates/index.html` | REPLACED | 3-column .cx-layout shell; loads `app.js` (ES module); legacy 2D flow preserved in `<details>`; split-screen CSS; tutorial overlay + header button |
+| `static/app.js` | REPLACED | 6-step ES-module state machine; 2D split-screen PACKING; CSS seal animation in REVIEW_SEAL; all Contract A calls; tutorial carousel |
 | `static/glossary.js` | NEW | Canonical GLOSSARY (13 terms) + `buildHelpPopover()` helper; img/caption support for SEAL#/CONNEX# |
 | `docs/handoff/frontend.md` | NEW | This file |
 
 **Files NOT changed (owned by other agents):**
-`static/style.css`, `static/tokens.css`, `static/connex3d.js`, `app.py`, all Python modules.
+`static/style.css`, `static/tokens.css`, `app.py`, all Python modules.
 
 ---
 
@@ -87,29 +87,19 @@ A box is `complete` when: populated AND has SLOC AND has SHRH POC. Computed serv
 
 ---
 
-## REVIEW_SEAL Step — 3D Integration
+## REVIEW_SEAL Step — Seal Animation
 
-3D canvas is mounted in `initReviewScene()` (async, non-blocking):
-```js
-const mod    = await import("/static/connex3d.js");  // dynamic import — throws → fallback
-const canvas = document.createElement("canvas");
-mount.appendChild(canvas);
-STATE.scene  = mod.createConnexScene(canvas, {});
-await STATE.scene.openConnex(false);     // read-only, no drag
-STATE.scene.setBoxCount(boxes.length);
-boxes.forEach(b => STATE.scene.setBoxState(b.box_num, {...}));
-STATE.scene.onBoxSelect(boxNum => showReviewBoxDetail(boxNum));
-```
+> **Superseded:** the original three.js `connex3d.js` integration described here was
+> dead code and has been removed. The seal is now a **pure-CSS** animation.
 
-On WebGL failure: `try/catch` suppresses; `#cx-3d-loading` shows "3D view unavailable — using checklist above." The box checklist table is always rendered regardless of 3D availability.
+REVIEW_SEAL renders a per-box checklist table. On "Apply Stamp & Seal",
+`applyStampAndGenerate()` calls `playSealAnimation(unitLabel)` — a full-screen CSS
+3D-transform overlay (connex doors swing closed, gold lock bar slides across, `SEALED`
+stamp lands). No WebGL, no canvas, no dynamic import. The download API call runs
+concurrently and is awaited after the animation completes.
 
-On stamp + seal (in `applySealAndDownload()`):
-```js
-STATE.scene.applyStamp(profile.stamp_text);
-await STATE.scene.closeConnex(true);
-```
-
-On step exit: `STATE.scene.dispose()` is called by `goTo()` when leaving REVIEW_SEAL.
+See `docs/handoff/3d-connex.md` for the DOM structure, class-toggle contract, timeline,
+and the scoped `prefers-reduced-motion` fallback.
 
 ---
 
@@ -236,7 +226,7 @@ All original functions are preserved in a non-module `<script>` tag inside `#leg
 
 | Gap | Owner | Notes |
 |-----|-------|-------|
-| `connex3d.js` contract | 3D agent | Frontend calls `createConnexScene`, `openConnex`, `setBoxCount`, `setBoxState`, `onBoxSelect`, `applyStamp`, `closeConnex`, `dispose`, `resize` — all via dynamic import with try/catch fallback |
+| Seal animation | (done) | CSS-only `playSealAnimation()` + `.seal-*` rules; three.js `connex3d.js` removed as dead code. See `docs/handoff/3d-connex.md` |
 | AI helper | AI Assistant (fast-follow) | Hook in PACKING step individual-item form |
 | SITREP PDF richness | DD1750 agent | `/api/sitrep/pdf` returns JSON bytes as placeholder; auto-improves when `sitrep_render` ships |
 

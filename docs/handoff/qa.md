@@ -25,7 +25,7 @@
 - `test_acceptance_walkthrough()` — §8 steps 1–8 against real BOM PDFs
 - `test_seal_validation_matrix()` — all 5 Contract B codes + sunny-day + multi-error
 - `test_adversarial()` — 9 adversarial scenarios (empty boxes, blank fields, 0/24 box counts, re-ingest, generate-then-second-connex, items-only path, missing SLOC/SHRH, signer==packer)
-- `test_frontend_wiring()` — headless static file checks (tokens.css, style.css, app.js, glossary.js, connex3d.js, formations manifest)
+- `test_frontend_wiring()` — headless static file checks (tokens.css, style.css, app.js, glossary.js, seal animation surface, formations manifest)
 
 Run: `python3 test_acceptance.py` (Flask must be running on :8000)
 

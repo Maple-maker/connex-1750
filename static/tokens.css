@@ -1,6 +1,6 @@
-/* tokens.css — CONTRACT E (do NOT rename these properties; 3D reads them via getComputedStyle)
+/* tokens.css — CONTRACT E (do NOT rename these properties)
  * Owned by: UI Design agent
- * Consumers: style.css, connex3d.js (3D), Frontend, QA
+ * Consumers: style.css, Frontend, QA
  * Last updated: 2026-06-17
  *
  * NOTE: panels use solid RGBA (no backdrop-filter/glassmorphism).

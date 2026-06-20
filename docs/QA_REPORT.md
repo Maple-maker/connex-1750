@@ -97,14 +97,14 @@ Executed against real BOM PDFs from `arms room BOMs/` directory.
 
 | Check | Result |
 |-------|--------|
-| index.html loads, references tokens.css/style.css/connex3d.js | PASS |
-| importmap present, three.js CDN wired | PASS |
+| index.html loads, references tokens.css/style.css/app.js | PASS |
 | tokens.css: all 5 CSS custom properties present | PASS |
 | app.js: POSTs /api/profiles with brigade_image | PASS |
 | app.js: fetches /static/formations/manifest.json | PASS |
 | app.js: references /api/sitrep | PASS |
+| app.js: defines playSealAnimation() (CSS seal animation) | PASS |
 | glossary.js: SLOC, SHRH, SUN, NSN, LIN defined | PASS |
-| connex3d.js: exports all Contract D surface (7 symbols) | PASS |
+| style.css: #seal-overlay + reduced-motion seal fallback present | PASS |
 | formations manifest: 200, has formations list (97 entries) | PASS |
 
 ### Manual Browser Checks Required

@@ -80,7 +80,7 @@ open static/_styleguide.html
 | `.cx-bom-card__code--lin` / `--nsn` / `--sn` | Code chip color variants. |
 | `.cx-layout` | 3-column grid shell (220px / 1fr / 320px). |
 | `.cx-rail-left` / `.cx-rail-right` | Left/right panels. Collapse to horizontal drawers ≤1100px. |
-| `.cx-center` | Center column — wraps the three.js canvas area. |
+| `.cx-center` | Center column — wraps the active workflow panels. |
 | `.cx-view-toggle` + `.cx-view-toggle__btn` | 3D / Table toggle strip. Add `--active` to current tab. |
 | `.cx-error-list` + `.cx-error-list__item` | Seal validation error block. Mirror of Contract B. |
 | `.cx-divider` | 1px gold-tinted separator. |
@@ -137,9 +137,9 @@ Include the `toggleHelp()` function from `_styleguide.html` in `app.js` or inlin
 
 **Touch targets:** all `.cx-btn` and `.cx-help__trigger` meet 44×44px minimum. `.cx-btn--sm` drops to 32px — acceptable for desktop-first tool operators.
 
-**Responsive:** rails collapse to horizontal drawers at ≤1100px. The stepper flips to horizontal. The three.js canvas stays full-width in the center column.
+**Responsive:** rails collapse to horizontal drawers at ≤1100px. The stepper flips to horizontal.
 
-**Stamp aesthetic:** `.cx-stamp` uses a double-border (border + outline) and mono font to read as a physical inked stencil. The `applyStamp(text)` call in `connex3d.js` should use the same text value (`stamp_text` from the profile) that the HTML stamp renders — the 3D decal and the SITREP HTML stamp must be visually consistent.
+**Stamp aesthetic:** `.cx-stamp` uses a double-border (border + outline) and mono font to read as a physical inked stencil. The `SEALED` stamp in the CSS seal animation (`.seal-stamp`) and the SITREP HTML stamp both derive from `stamp_text` on the profile, so they stay visually consistent.
 
 ---
 

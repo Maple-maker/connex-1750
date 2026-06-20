@@ -121,6 +121,14 @@ def ingest_bom(pdf_path: str, nomenclature: str = "") -> dict:
         "lin":           "",
         "end_item_niin": "",
         "uic":           "",
+        # Provenance tags so the UI can flag filename-sourced (lower-confidence)
+        # identifiers for review. "content" = pulled from the paperwork (text,
+        # form fields, or header OCR); "filename" = recovered from the filename
+        # fallback; "" = never found. The NIIN is never in the filename, so a
+        # populated NIIN is always "content".
+        "lin_source":    "",
+        "serial_source": "",
+        "niin_source":   "",
         "item_count":    0,
         "items":         [],
         "zero_on_hand":  False,
@@ -222,6 +230,16 @@ def ingest_bom(pdf_path: str, nomenclature: str = "") -> dict:
             except Exception as exc:
                 out["errors"].append(f"bom_parser fallback failed: {exc}")
 
+    # Tag whatever the PAPERWORK produced as "content" before the filename
+    # fallback runs. The NIIN can only ever come from content (it isn't encoded
+    # in the filename), so its tag is finalized here.
+    if out["lin"]:
+        out["lin_source"] = "content"
+    if out["serial_number"]:
+        out["serial_source"] = "content"
+    if out["end_item_niin"]:
+        out["niin_source"] = "content"
+
     # ── PHASE 3: filename metadata recovery ───────────────────────────────────
     # If the PDF extraction couldn't recover LIN / serial / model, fall back to
     # the filename, which encodes them reliably for this data set. We only FILL
@@ -230,9 +248,11 @@ def ingest_bom(pdf_path: str, nomenclature: str = "") -> dict:
         parsed = _parse_filename(filename)
         if not out["lin"] and parsed.lin:
             out["lin"] = parsed.lin
+            out["lin_source"] = "filename"
             out["warnings"].append(f"LIN '{parsed.lin}' recovered from filename.")
         if not out["serial_number"] and parsed.sn:
             out["serial_number"] = parsed.sn
+            out["serial_source"] = "filename"
             out["warnings"].append(f"Serial '{parsed.sn}' recovered from filename.")
         if not out["model"] and parsed.model:
             out["model"] = parsed.model

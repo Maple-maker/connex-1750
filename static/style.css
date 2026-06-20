@@ -699,6 +699,72 @@ textarea.cx-field {
   text-overflow: ellipsis;
 }
 
+/* Permanent product wordmark — always visible, never rewritten by renderBanner().
+   Sits at the far left of the banner, separated from the unit identity. */
+.cx-wordmark {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex-shrink: 0;
+  padding-right: var(--space-3);
+  margin-right: var(--space-2);
+  border-right: 1px solid var(--connex-stroke);
+}
+.cx-wordmark__acro {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--connex-gold);
+  line-height: 1.05;
+  white-space: nowrap;
+  /* acronym is the prominent line — render it first visually */
+  order: -1;
+}
+.cx-wordmark__full {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--connex-gray);
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Narrow screens: drop the long tagline, keep the C.R.A.T.E. acronym */
+@media (max-width: 720px) {
+  .cx-wordmark__full { display: none; }
+}
+
+/* Remove (×) control on Packing box summary cards */
+.cx-box-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  line-height: 1;
+  font-size: 16px;
+  border: 1px solid var(--connex-stroke);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--connex-gray);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.cx-box-remove:hover {
+  color: var(--connex-danger);
+  border-color: var(--connex-danger);
+  background: rgba(229, 103, 90, 0.12);
+}
+.cx-box-remove:focus-visible {
+  outline: 2px solid var(--connex-danger);
+  outline-offset: 2px;
+}
+
 
 /* ═══════════════════════════════════════════════════════════
    .cx-help — ? GLOSSARY POPOVER
@@ -792,24 +858,15 @@ textarea.cx-field {
   border-top-color: var(--connex-stroke);
 }
 
-/* Open state (toggled by JS or :has() sibling) */
-.cx-help--open .cx-help__popover,
-.cx-help__popover[data-open] {
+/* Open state — toggled by toggleHelp() in app.js, which adds/removes
+   .cx-help__popover--open directly on the popover element. The base
+   .cx-help__popover is hidden via opacity:0 + pointer-events:none (not
+   display:none), so the open class must un-hide it the same way. This is
+   the single source of truth for the open state — JS and CSS agree on
+   this exact class name. */
+.cx-help__popover--open {
   opacity: 1;
   pointer-events: auto;
-}
-
-/* Edge case: popover near right edge flips left */
-.cx-help--flip-left .cx-help__popover {
-  left: auto;
-  right: 0;
-  transform: none;
-}
-
-.cx-help--flip-left .cx-help__popover::after {
-  left: auto;
-  right: 8px;
-  transform: none;
 }
 
 
@@ -1395,11 +1452,12 @@ textarea.cx-field {
   box-shadow: inset 0 0 4px rgba(0,0,0,0.5);
 }
 
-/* Left door — hinge at left edge */
+/* Left door — hinge at left edge.
+   Open angle is 62° (not edge-on 78°) so the swing reads clearly in 3/4 view. */
 .seal-door-left {
   left: 0;
   transform-origin: 0 50%;
-  transform: rotateY(-78deg);
+  transform: rotateY(-62deg);
   border-right: 3px solid #4a3a22;
 }
 .seal-door-left .dl-bar { right: 14px; }
@@ -1408,7 +1466,7 @@ textarea.cx-field {
 .seal-door-right {
   right: 0;
   transform-origin: 100% 50%;
-  transform: rotateY(78deg);
+  transform: rotateY(62deg);
   border-left: 3px solid #4a3a22;
 }
 .seal-door-right .dr-bar { left: 14px; }
@@ -1478,3 +1536,51 @@ textarea.cx-field {
   transition: opacity 0.4s ease;
 }
 .seal-status-line.visible { opacity: 1; }
+
+/* ─── Reduced-motion fallback (scoped to .seal-* only) ───────
+   The global prefers-reduced-motion rule (top of file) nukes ALL
+   transitions to 0.01ms, which makes the seal sequence snap to its
+   end state instantly and look broken. We deliberately re-author a
+   calm, motion-free version here: no door swing, no slide, no pop.
+   The doors start already closed, the overlay simply fades in, and
+   the gold bar + SEALED stamp appear via a short opacity fade. The
+   JS sequence (which only toggles classes) still drives the reveal
+   timing — these rules just remove the spatial motion. */
+@media (prefers-reduced-motion: reduce) {
+  /* Overlay still fades in (opacity only — allowed, no spatial motion) */
+  #seal-overlay { transition: opacity 0.3s ease !important; }
+
+  /* Doors begin closed; never swing */
+  .seal-door-left,
+  .seal-door-right,
+  .seal-door-left.door-closed,
+  .seal-door-right.door-closed {
+    transform: rotateY(0deg) !important;
+    transition: none !important;
+  }
+
+  /* Gold lock bar: skip the width slide, fade it in at full width
+     once .locked is applied */
+  .seal-lock-bar {
+    width: 400px !important;
+    opacity: 0;
+    transition: opacity 0.3s ease !important;
+  }
+  .seal-lock-bar.locked { opacity: 1; }
+
+  /* SEALED stamp: skip the scale pop, fade it in at full size */
+  .seal-stamp {
+    transform: translate(-50%, -50%) rotate(-7deg) scale(1) !important;
+    opacity: 0;
+    transition: opacity 0.3s ease !important;
+  }
+  .seal-stamp.visible { opacity: 1; }
+
+  /* Side badge/star and status line keep their (already motion-free)
+     color/opacity fades, but bound the duration so nothing lingers */
+  .seal-side-star,
+  .seal-side-badge,
+  .seal-status-line {
+    transition-duration: 0.3s !important;
+  }
+}

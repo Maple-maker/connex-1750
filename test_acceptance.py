@@ -501,9 +501,6 @@ def test_frontend_wiring():
     html = r.text
     chk("FE: tokens.css referenced", "tokens.css" in html)
     chk("FE: style.css referenced", "style.css" in html)
-    chk("FE: connex3d.js referenced", "connex3d.js" in html)
-    chk("FE: importmap present", "importmap" in html)
-    chk("FE: three importmap present", '"three"' in html or "three.module" in html)
     chk("FE: app.js referenced", "app.js" in html)
 
     r = requests.get(f"{BASE}/static/tokens.css")
@@ -528,10 +525,14 @@ def test_frontend_wiring():
         chk(f"FE: glossary defines {term}", term in r.text)
     chk("FE: glossary defines SHRH", "SHRH" in r.text or "shrh" in r.text.lower())
 
-    r = requests.get(f"{BASE}/static/connex3d.js")
-    chk("FE: connex3d.js loads", r.status_code == 200)
-    for sym in ("createConnexScene", "setBoxCount", "onBoxDrop", "resolveDropAt", "applyStamp", "openConnex", "closeConnex"):
-        chk(f"FE: connex3d exports {sym}", sym in r.text)
+    # Seal animation is pure CSS (.seal-* in style.css) + playSealAnimation() in app.js —
+    # no three.js / connex3d module. Verify the CSS + JS surface instead.
+    r = requests.get(f"{BASE}/static/style.css")
+    chk("FE: style.css has seal overlay", "#seal-overlay" in r.text)
+    chk("FE: style.css has reduced-motion seal fallback",
+        "prefers-reduced-motion" in r.text and "seal-stamp" in r.text)
+    r = requests.get(f"{BASE}/static/app.js")
+    chk("FE: app.js has playSealAnimation", "playSealAnimation" in r.text)
 
     r = requests.get(f"{BASE}/static/formations/manifest.json")
     chk("FE: formations manifest loads", r.status_code == 200, str(r.status_code))

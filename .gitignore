@@ -11,3 +11,8 @@ data/profiles/*
 data/connexes/*
 !data/profiles/.gitkeep
 !data/connexes/.gitkeep
+
+# Runtime SQLite job store (job_store.py, WAL mode)
+data/jobs.db
+data/jobs.db-wal
+data/jobs.db-shm

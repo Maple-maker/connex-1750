@@ -9,6 +9,107 @@ import sys, os, json
 sys.path.insert(0, os.path.dirname(__file__))
 
 from bom_ingest import ingest_bom
+from dd1750_core import extract_metadata, OCR_AVAILABLE, _normalize_niin
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Issue 4 regression: end-item Serial / LIN / NIIN / DESC must parse out of the
+# printed HEADER BAND of an image-only GCSS-Army BOM, not just the filename.
+#
+# The header OCR pass needs a live tesseract binary, which isn't always present.
+# So the CORE assertion feeds a representative OCR-text header string straight
+# through extract_metadata() — that path runs regardless of OCR install and
+# exercises the hardened regexes + NIIN normalization. When a real tesseract
+# binary IS available, we additionally ingest the golden ANTENNA MAST GROUP PDF
+# (whose filename carries serial+LIN but NOT the NIIN) and assert the NIIN was
+# recovered from CONTENT.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _tesseract_runnable() -> bool:
+    """OCR_AVAILABLE means the python bindings imported; it does NOT guarantee
+    the tesseract binary is on PATH. Probe for the binary so live-OCR assertions
+    only run when OCR can actually execute."""
+    import shutil
+    return OCR_AVAILABLE and shutil.which("tesseract") is not None
+
+
+def test_extract_metadata_from_ocr_header_text():
+    """extract_metadata parses the reference header even with OCR confusables."""
+    # Representative OCR-text of the ANTENNA MAST GROUP header band. The NIIN is
+    # rendered with the classic tesseract confusables (O for 0, l/I for 1) to
+    # prove the normalization step. Reference values:
+    #   NIIN 015246888 | LIN A80637 | SER 650140 | DESC ANTENNA MAST GROUP | UIC WH1ZB0
+    header = (
+        "UIC: WH1ZB0   SER/EQUIP NO: 650140\n"
+        "END ITEM NIIN: O15246888   LIN: A80637   DESC: ANTENNA MAST GROUP\n"
+    )
+    meta = extract_metadata(header)
+
+    assert meta.end_item_niin == "015246888", f"NIIN parse/normalize failed: {meta.end_item_niin!r}"
+    assert meta.lin == "A80637", f"LIN parse failed: {meta.lin!r}"
+    assert meta.serial_equip_no == "650140", f"Serial parse failed: {meta.serial_equip_no!r}"
+    assert meta.end_item_description.startswith("ANTENNA MAST GROUP"), \
+        f"DESC parse failed: {meta.end_item_description!r}"
+    assert meta.uic == "WH1ZB0", f"UIC parse failed: {meta.uic!r}"
+    print("PASS  test_extract_metadata_from_ocr_header_text")
+
+
+def test_niin_normalization_unit():
+    """_normalize_niin maps OCR confusables O->0, I/l->1 and leaves digits."""
+    assert _normalize_niin("O15246888") == "015246888"
+    assert _normalize_niin("Ol5246888") == "015246888"
+    assert _normalize_niin("015246888") == "015246888"
+    print("PASS  test_niin_normalization_unit")
+
+
+def test_lin_bounded_to_six_chars():
+    """LIN regex stops at 6 alphanumerics and won't swallow adjacent header text."""
+    meta = extract_metadata("LIN: A80637 DESC: ANTENNA MAST GROUP")
+    assert meta.lin == "A80637", f"LIN over/under-captured: {meta.lin!r}"
+    print("PASS  test_lin_bounded_to_six_chars")
+
+
+def test_golden_bom_niin_from_content_when_renamed():
+    """When OCR can actually run, the NIIN must come from the header image even
+    if the filename is stripped of identifiers (NIIN is never in the filename)."""
+    if not _tesseract_runnable():
+        print("SKIP  test_golden_bom_niin_from_content_when_renamed (tesseract binary not on PATH)")
+        return
+
+    golden = (
+        "/Users/jaidenrabatin/Desktop/AEGIS/30-PROJECTS/active/1750_bulk_editor/"
+        "CONNEX_1750_AGENT_STARTER/FC BOMS/650140 B34S A80637 ANTENNA MAST GROUP.pdf"
+    )
+    if not os.path.exists(golden):
+        print(f"SKIP  test_golden_bom_niin_from_content_when_renamed (fixture missing: {golden})")
+        return
+
+    # Copy to a neutral name so any recovered NIIN/LIN/serial PROVES it came from
+    # the paperwork content, not the filename.
+    import shutil, tempfile
+    tmpdir = tempfile.mkdtemp()
+    neutral = os.path.join(tmpdir, "scan_0001.pdf")
+    shutil.copyfile(golden, neutral)
+    try:
+        result = ingest_bom(neutral, nomenclature="ANTENNA MAST GROUP")
+        assert result["end_item_niin"] == "015246888", \
+            f"NIIN not recovered from content: {result['end_item_niin']!r}"
+        assert result["niin_source"] == "content", \
+            f"niin_source tag wrong: {result['niin_source']!r}"
+        print("PASS  test_golden_bom_niin_from_content_when_renamed "
+              f"(niin={result['end_item_niin']} source={result['niin_source']})")
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _run_issue4_regression():
+    print(f"\n{'='*70}")
+    print(f"Issue 4 regression  (OCR_AVAILABLE={OCR_AVAILABLE}, "
+          f"tesseract_runnable={_tesseract_runnable()})")
+    test_extract_metadata_from_ocr_header_text()
+    test_niin_normalization_unit()
+    test_lin_bounded_to_six_chars()
+    test_golden_bom_niin_from_content_when_renamed()
 
 TEST_BOMS = [
     (
@@ -52,6 +153,9 @@ for pdf_path, nom in TEST_BOMS:
     if result["errors"]:
         for e in result["errors"]:
             print(f"  ERR : {e}")
+
+# Issue 4 regression assertions (these raise on failure -> non-zero exit).
+_run_issue4_regression()
 
 print(f"\n{'='*70}")
 print("Done.")

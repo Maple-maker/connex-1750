@@ -1,207 +1,119 @@
-# 3D Connex Agent Handoff
+# Seal Animation — Handoff
 
-**Date:** 2026-06-17
-**Agent:** 3D Connex
-**Wave:** 2
-**Branch:** feat/connex-3d
-
----
-
-## Files Delivered
-
-| File | Purpose |
-|------|---------|
-| `static/connex3d.js` | Contract D ES module — exports `createConnexScene` |
-| `static/connex3d/_harness.html` | Isolated dev/QA harness — exercises every Contract D method |
-| `docs/handoff/3d-connex.md` | This file |
+> **History:** This doc previously described a three.js "Contract D" 3D scene
+> (`static/connex3d.js` + `static/connex3d/_harness.html`). That code was **dead** —
+> imported nowhere, never wired into `index.html`, and replaced by a pure-CSS seal
+> animation. The three.js files and harness were **deleted**. There is no WebGL,
+> no canvas, no importmap anywhere in this app. If you find a stray reference to
+> `connex3d`, it is a leftover and should be removed.
 
 ---
 
-## Importmap — Frontend MUST add to `templates/index.html`
+## What it is
 
-Add this block **before any `<script type="module">`** that imports or transitively loads `connex3d.js`:
+The "Apply Stamp & Seal" button at Step 5 plays a full-screen **CSS 3D-transform**
+animation of a shipping connex closing and being sealed. It is built entirely from
+HTML + CSS transforms — no library, no build step.
 
-```html
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-  }
-}
-</script>
+- **JS:** `playSealAnimation(unitLabel)` in `static/app.js` (builds the overlay,
+  sequences the reveal via `setTimeout` class toggles, returns a `Promise`).
+- **CSS:** the `.seal-*` rules in `static/style.css` (the `SEAL ANIMATION OVERLAY`
+  block).
+- **Caller:** `applyStampAndGenerate()` in `static/app.js`.
+
+---
+
+## DOM structure (built by JS)
+
+```
+#seal-overlay                 (fixed full-screen scrim; .seal-active toggles opacity)
+  .seal-scene                 (perspective: 1000px)
+    .seal-connex              (rotateX(6deg) rotateY(-22deg), preserve-3d — 3/4 view)
+      .seal-top               (top face, rotateX(90deg))
+      .seal-side              (left face, rotateY(-90deg))
+        .seal-side-star       (★ — fades in)
+        .seal-side-badge      (unit label — fades in)
+      .seal-front             (front face, preserve-3d — holds the doors)
+        .seal-front-ribs
+        .seal-door-left  > .dl-bar   (hinge left edge,  rotateY(-62°) → 0°)
+        .seal-door-right > .dr-bar   (hinge right edge, rotateY( 62°) → 0°)
+        .seal-seam            (center seam line)
+        .seal-lock-bar        (gold bar, width 0 → 400px)
+        .seal-stamp           (SEALED, scale(0) → scale(1))
+  .seal-status-line           ("Generating DD1750s…" — fades in)
 ```
 
-Then load the module:
-```html
-<script type="module" src="/static/connex3d.js"></script>
-<!-- or import inside your app.js module -->
-```
+---
 
-`connex3d.js` imports by bare specifier (`import * as THREE from 'three'`) so the importmap must be present before it runs. The CDN serves three.js as a native ES module; no bundler or build step required.
+## Class-toggle ↔ CSS contract
+
+The JS **only toggles classes**; all motion lives in CSS transitions. These must
+stay in agreement:
+
+| JS toggles class | On element | CSS rule that responds |
+|------------------|-----------|------------------------|
+| `seal-active`    | `#seal-overlay`        | `#seal-overlay.seal-active { opacity: 1 }` |
+| `door-closed`    | `.seal-door-left/right`| `.seal-door-*.door-closed { transform: rotateY(0) }` |
+| `visible`        | `.seal-side-star`      | `.seal-side-star.visible { color: … }` |
+| `visible`        | `.seal-side-badge`     | `.seal-side-badge.visible { color: … }` |
+| `locked`         | `.seal-lock-bar`       | `.seal-lock-bar.locked { width: 400px }` |
+| `visible`        | `.seal-stamp`          | `.seal-stamp.visible { transform: …scale(1) }` |
+| `visible`        | `.seal-status-line`    | `.seal-status-line.visible { opacity: 1 }` |
 
 ---
 
-## Contract D — Module Surface
+## Timeline (ms, from `requestAnimationFrame` after overlay is appended)
+
+| t (ms) | Action |
+|--------|--------|
+| 0      | `#seal-overlay` gets `.seal-active` → scrim fades in (0.35s) |
+| 350    | Left door `.door-closed` → swings −62° → 0° (0.7s) |
+| 530    | Right door `.door-closed` → swings +62° → 0° (0.7s) |
+| 1100   | Side `★` + unit badge fade in (~0.5s) |
+| 1350   | Gold lock bar `.locked` → width 0 → 400px slides across seam (0.55s) |
+| 1950   | `SEALED` stamp `.visible` → scale(0) → scale(1) with overshoot ease (0.3s) |
+| 2150   | Status line "Generating DD1750s…" fades in |
+| 3100   | `.seal-active` removed → scrim fades out; overlay removed at 3480ms; Promise resolves |
+
+Total runtime ≈ **3.5s**. If you retune, keep each step's start after the previous
+transition has visibly begun, and keep the door open angle at ±62° (edge-on ±78°
+reads as invisible in the 3/4 view).
+
+---
+
+## Reduced motion
+
+The global rule at the top of `style.css` forces **all** transitions/animations to
+`0.01ms` under `prefers-reduced-motion: reduce`. Left alone, that snaps the whole
+sequence to its end state instantly and looks broken.
+
+There is a **scoped `@media (prefers-reduced-motion: reduce)` override** at the end
+of the `.seal-*` block that restores a calm, motion-free version:
+
+- doors start already closed (no swing),
+- gold bar appears at full width via a short opacity fade (no slide),
+- SEALED stamp appears at full size via opacity fade (no scale pop),
+- overlay/star/badge/status keep their opacity-only fades.
+
+The JS sequence is unchanged — it still toggles the same classes at the same times;
+the reduced-motion CSS just removes the spatial motion. If you add new moving parts
+to the seal, add a matching reduced-motion entry so the global nuke doesn't break it.
+
+---
+
+## Timing race (caller)
+
+`applyStampAndGenerate()` fires the download API call **concurrently** with the
+animation:
 
 ```js
-import { createConnexScene } from '/static/connex3d.js';
-
-const scene = createConnexScene(canvasEl, opts);
+const apiCall = api.download(...).catch(e => { apiError = e; });
+await playSealAnimation(unitLabel);   // always runs full ~3.5s
+await apiCall;                         // then await whatever's left of the download
 ```
 
-### `createConnexScene(canvasEl, opts)` → ConnexScene
-
-| Param | Type | Required | Notes |
-|-------|------|----------|-------|
-| `canvasEl` | `HTMLCanvasElement` | yes | The `<canvas>` element to render into. Must have non-zero `clientWidth`/`clientHeight`. |
-| `opts.animate` | `boolean` | no (default `true`) | Set `false` in tests to skip animations and resolve Promises instantly. |
-
-**Throws** `Error` (message starts with `[connex3d]`) if WebGL is unavailable. Frontend must wrap in try/catch and show list fallback.
-
----
-
-### ConnexScene methods
-
-#### `setBoxCount(n: number): void`
-Spawn or despawn boxes to exactly `n` (clamped to 0–24). New boxes scale-in; removed boxes pop off. Grid re-layouts automatically.
-
-#### `setBoxState(boxNum: number, state: object): void`
-Recolor + re-badge a single box. `boxNum` is 1-based.
-
-```js
-scene.setBoxState(3, {
-  complete: false,   // true → green ✓ state
-  bomCount: 2,       // shown in badge when complete
-  hasItems: true,    // true + !complete → amber ⚠ state
-});
-```
-
-State → color mapping (reads Contract E tokens, never hardcoded hex):
-- `hasItems: false` → `--connex-empty` (gray)
-- `hasItems: true, complete: false` → `--connex-warn` (amber) + ⚠ badge
-- `complete: true` → `--connex-ok` (green) + ✓ + bomCount badge
-
-#### `onBoxDrop(cb: (boxNum: number, payload: any) => void): void`
-Register the drop callback. Fired by `resolveDropAt()` when a dragged payload lands on a box.
-
-#### `onBoxSelect(cb: (boxNum: number) => void): void`
-Register the select callback. Fired on `pointerup` over a box mesh.
-
-#### `openConnex(animate?: boolean): Promise<void>`
-Swing doors open; camera eases to look inside. Returns a Promise that resolves when the animation completes (or immediately if `animate=false`).
-
-#### `closeConnex(animate?: boolean): Promise<void>`
-Swing doors shut. Returns a Promise.
-
-#### `applyStamp(text: string): void`
-Fade a stencil battalion-stamp decal onto the closed door face. `text` may contain `\n` for multi-line. Matches the `.cx-stamp` visual aesthetic from the design system.
-
-#### `highlightBox(boxNum: number, on: boolean): void`
-Show/hide the gold selection ring (`--connex-gold`) around a box. Used both for drag-over affordance and persistent selection. Clearing one box's ring when a new one is highlighted is handled internally.
-
-#### `resolveDropAt(clientX: number, clientY: number, payload: any): void`
-**Call from the canvas `drop` event handler.** Raycasts from pointer coordinates to find the box under the cursor, fires `onBoxDrop(boxNum, payload)`, and clears the drag highlight. Frontend owns the data move (call `/api/connex/<id>/assign` in `onBoxDrop`).
-
-#### `resize(): void`
-Update renderer + camera aspect ratio. Call from a `ResizeObserver` on the canvas wrapper or from `window.resize`.
-
-#### `dispose(): void`
-Free all GPU resources (geometries, materials, textures, renderer). Remove event listeners. After calling `dispose()` the instance is unusable.
-
----
-
-## Drag-Drop Protocol (how Frontend wires it)
-
-```js
-// 1. Register drop callback
-scene.onBoxDrop((boxNum, payload) => {
-  fetch(`/api/connex/${connexId}/assign`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ moves: [{ bom_id: payload.bomId, box_num: boxNum }] }),
-  }).then(r => r.json()).then(({ connex }) => {
-    // 2. Update box state from response
-    const box = connex.boxes[boxNum - 1];
-    scene.setBoxState(boxNum, {
-      complete: box.sloc && box.shrh_poc && box.boms.length > 0,
-      bomCount: box.boms.length,
-      hasItems: box.boms.length > 0,
-    });
-  });
-});
-
-// 3. Canvas dragover — highlight box under pointer
-canvas.addEventListener('dragover', e => {
-  e.preventDefault();
-  scene.resolveDropAt(e.clientX, e.clientY, { __probe: true }); // noop payload to trigger highlight side-effect
-  // OR: call scene.highlightBox after your own hit-test — both patterns work.
-});
-
-// 4. Canvas drop
-canvas.addEventListener('drop', e => {
-  e.preventDefault();
-  const payload = { bomId: e.dataTransfer.getData('text/plain') };
-  scene.resolveDropAt(e.clientX, e.clientY, payload);
-});
-```
-
-> Note: `resolveDropAt` fires `onBoxDrop` only when a box is hit. If the pointer misses all boxes it is a no-op. The drag highlight is cleared automatically on every `resolveDropAt` call.
-
----
-
-## Opening the Harness
-
-```bash
-# Option 1 — Flask (recommended, handles ES module CORS)
-python app.py
-# then open: http://localhost:5000/static/connex3d/_harness.html
-
-# Option 2 — Python static server from repo root
-python3 -m http.server 5001
-# then open: http://localhost:5001/static/connex3d/_harness.html
-```
-
-The harness exercises every Contract D method via buttons. Drag the BOM cards onto the canvas to test drop flow. The Event Log panel shows all callbacks fired.
-
----
-
-## Opts Accepted
-
-| opt | default | description |
-|-----|---------|-------------|
-| `animate` | `true` | Set `false` in QA / headless tests. Animations skip; Promises resolve immediately. |
-
----
-
-## Contracts Consumed
-
-- Contract E (`static/tokens.css`) — reads `--connex-empty`, `--connex-warn`, `--connex-ok`, `--connex-gold`, `--connex-gray` via `getComputedStyle` at runtime. Never hardcodes hex.
-
-## Contracts Produced
-
-- Contract D (`static/connex3d.js`) — the full `createConnexScene` API described above.
-
----
-
-## Known Gaps / TODO for Downstream
-
-- **Frontend must add the importmap** (exact block in this doc) to `templates/index.html`.
-- `resolveDropAt` currently uses `onBoxDrop` to signal the drop. If Frontend needs a synchronous "which box is under pointer X,Y" without side effects, expose a separate `getBoxAt(clientX, clientY): number | null` — not needed for the current contract but easy to add.
-- The ghost prompt ("Choose box count") is visible when `boxCount = 0`. Frontend should call `setBoxCount(n)` as soon as the operator picks a count.
-- `applyStamp(text)` replaces any existing stamp. Multiple stamps on the same connex are not supported — call once after `closeConnex()`.
-- Dispose leaks are guarded only for items created by `createConnexScene`. Shared geometry/material cache (`_geoCache`) in the module scope persists for the page lifetime — acceptable for a single-page tool; reset on full page navigation.
-
-## How to Verify
-
-1. Open harness via Flask or Python server (URLs above).
-2. Click **openConnex()** → doors swing open.
-3. Click **setBoxCount(8)** → 8 boxes spawn with scale-in animation.
-4. Change box # to 2, click **⚠ Warn** → box 2 turns amber with ⚠.
-5. Change box # to 2, click **✓ OK** → box 2 turns green with ✓.
-6. Click **Highlight On** → gold ring appears on box 2.
-7. Drag a BOM card onto the canvas → box under pointer highlights, Event Log shows `onBoxDrop(box=N, payload={bomId:...})`.
-8. Click a box mesh → Event Log shows `onBoxSelect(N)`.
-9. Click **closeConnex()** → doors swing shut.
-10. Enter stamp text, click **applyStamp()** → stencil fades in on the door.
-11. Confirm no console errors. Confirm GPU memory via browser DevTools Performance tab (heap should not grow on repeated open/close cycles).
+This ordering is deliberate: the animation **always** runs to completion before the
+overlay is removed or the step advances to `NEXT_SITREP`. A fast (or failing) API
+response can **not** tear the overlay down early or jump steps mid-animation —
+`goTo("NEXT_SITREP")` only fires after both `await`s resolve. Preserve this ordering
+if you touch the function.

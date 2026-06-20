@@ -666,6 +666,177 @@ class TestAssignWarnings(unittest.TestCase):
         self.assertEqual(body["warnings"], [])
 
 
+class TestBoxAddRemove(unittest.TestCase):
+    """ISSUE 3 — add/remove box endpoints + store functions."""
+
+    def setUp(self):
+        shutil.rmtree(connex_store.CONNEXES_DIR, ignore_errors=True)
+        os.makedirs(connex_store.CONNEXES_DIR, exist_ok=True)
+        import app as _app
+        self._client = _app.app.test_client()
+
+    # ----- store layer -----
+
+    def test_add_box_increments_count(self):
+        cx = connex_store.create_connex(FAKE_PROFILE_ID, box_count=3)
+        updated = connex_store.add_box(cx["connex_id"])
+        self.assertEqual(updated["box_count"], 4)
+        self.assertEqual(len(updated["boxes"]), 4)
+        self.assertEqual(updated["boxes"][-1]["box_num"], 4)
+
+    def test_add_box_uses_max_plus_one_after_removal(self):
+        cx = connex_store.create_connex(FAKE_PROFILE_ID, box_count=3)
+        cid = cx["connex_id"]
+        # Remove box 2 (empty), then add — new box should be 4, not 2.
+        connex_store.remove_box(cid, 2)
+        updated = connex_store.add_box(cid)
+        nums = [b["box_num"] for b in updated["boxes"]]
+        self.assertEqual(nums, [1, 3, 4])
+
+    def test_remove_empty_box_decrements_count(self):
+        cx = connex_store.create_connex(FAKE_PROFILE_ID, box_count=3)
+        result = connex_store.remove_box(cx["connex_id"], 2)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["connex"]["box_count"], 2)
+        nums = [b["box_num"] for b in result["connex"]["boxes"]]
+        self.assertEqual(nums, [1, 3])  # no renumbering
+
+    def test_remove_nonempty_box_without_force_rejected(self):
+        cx = connex_store.create_connex(FAKE_PROFILE_ID, box_count=2)
+        connex_store.apply_bom_assignments(cx["connex_id"], {1: ["bom_x"]})
+        result = connex_store.remove_box(cx["connex_id"], 1)
+        self.assertFalse(result["ok"])
+        # Box still present.
+        loaded = connex_store.load_connex(cx["connex_id"])
+        self.assertEqual(loaded["box_count"], 2)
+
+    def test_remove_nonempty_box_with_force_removes(self):
+        cx = connex_store.create_connex(FAKE_PROFILE_ID, box_count=2)
+        connex_store.apply_bom_assignments(cx["connex_id"], {1: ["bom_x"]})
+        result = connex_store.remove_box(cx["connex_id"], 1, force=True)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["connex"]["box_count"], 1)
+        nums = [b["box_num"] for b in result["connex"]["boxes"]]
+        self.assertEqual(nums, [2])
+
+    def test_remove_missing_box_returns_error(self):
+        cx = connex_store.create_connex(FAKE_PROFILE_ID, box_count=1)
+        result = connex_store.remove_box(cx["connex_id"], 99)
+        self.assertFalse(result["ok"])
+
+    # ----- HTTP routes -----
+
+    def test_route_add_box(self):
+        cx = connex_store.create_connex(FAKE_PROFILE_ID, box_count=2)
+        resp = self._client.post(f"/api/connex/{cx['connex_id']}/boxes")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["connex"]["box_count"], 3)
+
+    def test_route_remove_empty_box(self):
+        cx = connex_store.create_connex(FAKE_PROFILE_ID, box_count=2)
+        resp = self._client.delete(f"/api/connex/{cx['connex_id']}/boxes/2")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["connex"]["box_count"], 1)
+
+    def test_route_remove_nonempty_box_409(self):
+        cx = connex_store.create_connex(FAKE_PROFILE_ID, box_count=2)
+        connex_store.apply_bom_assignments(cx["connex_id"], {1: ["bom_x"]})
+        resp = self._client.delete(f"/api/connex/{cx['connex_id']}/boxes/1")
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp.get_json()["code"], "BOX_NOT_EMPTY")
+
+    def test_route_remove_nonempty_box_force(self):
+        cx = connex_store.create_connex(FAKE_PROFILE_ID, box_count=2)
+        connex_store.apply_bom_assignments(cx["connex_id"], {1: ["bom_x"]})
+        resp = self._client.delete(f"/api/connex/{cx['connex_id']}/boxes/1?force=1")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["connex"]["box_count"], 1)
+
+    def test_route_add_box_sealed_409(self):
+        cx = self._sealed_connex()
+        resp = self._client.post(f"/api/connex/{cx['connex_id']}/boxes")
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp.get_json()["code"], "SEALED")
+
+    def test_route_remove_box_sealed_409(self):
+        cx = self._sealed_connex()
+        resp = self._client.delete(f"/api/connex/{cx['connex_id']}/boxes/1")
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp.get_json()["code"], "SEALED")
+
+    def _sealed_connex(self):
+        cx = connex_store.create_connex(FAKE_PROFILE_ID, box_count=1)
+        connex_store.apply_bom_assignments(cx["connex_id"], {1: ["bom_abc"]})
+        connex_store.patch_connex(cx["connex_id"], {
+            "boxes": [{"box_num": 1, "sloc": "BLDG-1", "shrh_poc": "CPT X"}],
+            "packed_by": "1LT RABATIN",
+            "signed_by": "CPT HOLLAND",
+        })
+        connex_store.seal_connex(cx["connex_id"])
+        return connex_store.load_connex(cx["connex_id"])
+
+
+class TestMajorEndItemsHeader(unittest.TestCase):
+    """ISSUE 7 — MAJOR END ITEMS count = (#BOMs) + (#non-blank individual items)."""
+
+    def test_per_box_count(self):
+        import app as _app
+        box = {
+            "box_num": 1,
+            "bom_ids": ["bom_a", "bom_b"],
+            "individual_items": [
+                {"description": "Helmet", "sn": "", "nsn": "", "lin": ""},
+                {"description": "", "sn": "x", "nsn": "", "lin": ""},  # blank — skip
+            ],
+        }
+        self.assertEqual(_app._box_major_end_items(box), 3)
+
+    def test_header_emits_correct_major_end_items(self):
+        import render_core
+        connex = {
+            "connex_id": "cx", "connex_no": "C1", "sun": "S1", "seal_no": "SE1",
+            "box_count": 2, "packed_by": "1LT R", "signed_by": "CPT H",
+            "date": "17 JUN 2026", "boxes": [],
+        }
+        box = {
+            "box_num": 1,
+            "bom_ids": ["bom_a", "bom_b"],
+            "sloc": "BLDG-1", "shrh_poc": "CPT X",
+            "individual_items": [
+                {"description": "Helmet", "sn": "", "nsn": "", "lin": ""},
+                {"description": "", "sn": "x", "nsn": "", "lin": ""},  # blank — skip
+            ],
+        }
+        import app as _app
+        hdr = render_core.build_connex_header(
+            connex, box, 2, "1", None,
+            major_end_items=_app._box_major_end_items(box),
+        )
+        self.assertIn("MAJOR END ITEMS: (3)", hdr.end_item)
+        # NO. BOXES unchanged — still the real box count.
+        self.assertEqual(hdr.num_boxes, "2")
+
+    def test_master_sums_over_boxes(self):
+        import app as _app
+        boxes = [
+            {"box_num": 1, "bom_ids": ["a", "b"], "individual_items": [
+                {"description": "X", "sn": "", "nsn": "", "lin": ""}]},
+            {"box_num": 2, "bom_ids": ["c"], "individual_items": []},
+        ]
+        master_mei = sum(_app._box_major_end_items(b) for b in boxes)
+        self.assertEqual(master_mei, 4)  # (2+1) + (1+0)
+
+    def test_default_falls_back_to_box_count(self):
+        import render_core
+        connex = {
+            "connex_id": "cx", "connex_no": "C1", "sun": "S1", "seal_no": "SE1",
+            "box_count": 5, "packed_by": "1LT R", "signed_by": "CPT H",
+            "date": "17 JUN 2026", "boxes": [],
+        }
+        hdr = render_core.build_connex_header(connex, {"box_num": 1}, 5, "1", None)
+        self.assertIn("MAJOR END ITEMS: (5)", hdr.end_item)
+
+
 if __name__ == "__main__":
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(sys.modules[__name__])
