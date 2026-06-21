@@ -34,6 +34,15 @@ Open **http://localhost:8000**.
 
 ---
 
+## Documentation
+
+- `docs/USER_GUIDE.md` - Operator workflow and troubleshooting notes.
+- `docs/S4_GUIDE.md` - S4-specific workflow and accountability checks.
+- `docs/COMMANDER_GUIDE.md` - Commander-oriented SITREP interpretation.
+- `docs/CODE_REVIEW_AGENT_PROMPTS.md` - Tiered prompt library for code reviews.
+
+---
+
 ## 6-step operator workflow
 
 ```
