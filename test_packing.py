@@ -331,7 +331,14 @@ if _failures:
     print("\nFailed checks:")
     for f in _failures:
         print(f"  - {f}")
-    sys.exit(1)
 else:
     print("All tests passed.")
-    sys.exit(0)
+
+
+def test_packing_checks():
+    """Expose the legacy script checks as one pytest assertion."""
+    assert not _failures, "\n".join(_failures)
+
+
+if __name__ == "__main__":
+    sys.exit(1 if _failures else 0)

@@ -957,6 +957,11 @@ import profiles as _profiles
 import connex_store as _connex_store
 import sitrep as _sitrep
 
+
+@app.errorhandler(_connex_store.ConnexSealedError)
+def handle_sealed_connex(error):
+    return jsonify({"error": str(error), "code": "SEALED"}), 409
+
 # ---------------------------------------------------------------------------
 # Profile routes  (Contract A §Profiles)
 # ---------------------------------------------------------------------------
@@ -1208,8 +1213,18 @@ def api_assign_connex(connex_id):
             continue
 
         if move.get("separate"):
-            occ = packing.occupied_boxes(box_map)
-            new_box = (max(occ) + 1) if occ else 1
+            # A separate move requires a dedicated physical box. Persist it
+            # first so the job map and connex manifest cannot reference a
+            # phantom box that PDF generation will never visit.
+            connex = _connex_store.add_box(connex_id)
+            if connex is None:
+                return jsonify({
+                    "error": f"Connex '{connex_id}' not found.",
+                    "code": "NOT_FOUND",
+                }), 404
+            new_box = max(b["box_num"] for b in connex.get("boxes", []))
+            valid_box_nums = {b["box_num"] for b in connex.get("boxes", [])}
+            box_count = len(valid_box_nums)
             for item in bom.get("items", []):
                 key = packing.item_key(bom_id, item["line_no"])
                 box_map = packing.reassign(box_map, key, new_box)

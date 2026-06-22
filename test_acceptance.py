@@ -15,6 +15,13 @@ import io
 import zipfile
 import requests
 
+if __name__ != "__main__" and os.environ.get("RUN_LIVE_ACCEPTANCE") != "1":
+    import pytest
+    pytest.skip(
+        "live acceptance suite requires RUN_LIVE_ACCEPTANCE=1 and localhost:8000",
+        allow_module_level=True,
+    )
+
 BASE = "http://localhost:8000"
 BOM_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),

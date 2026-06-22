@@ -19,9 +19,17 @@ from datetime import datetime, timezone
 from typing import Any
 
 import packing  # existing module — item_key, grouped_box_map, reassign, occupied_boxes
+from file_lock import exclusive_file_lock
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONNEXES_DIR = os.path.join(BASE_DIR, "data", "connexes")
+
+
+class ConnexSealedError(RuntimeError):
+    """Raised when code attempts to mutate an already sealed connex."""
+
+    def __init__(self) -> None:
+        super().__init__("Connex is sealed — changes are locked.")
 
 
 # ---------------------------------------------------------------------------
@@ -34,6 +42,10 @@ def _now_iso() -> str:
 
 def _connex_path(connex_id: str) -> str:
     return os.path.join(CONNEXES_DIR, f"{connex_id}.json")
+
+
+def _connex_lock_path(connex_id: str) -> str:
+    return os.path.join(CONNEXES_DIR, f".{connex_id}.lock")
 
 
 def _atomic_write(path: str, data: dict) -> None:
@@ -63,6 +75,11 @@ def _empty_box(box_num: int) -> dict:
         "individual_items": [],
         "complete": False,
     }
+
+
+def _ensure_mutable(connex: dict) -> None:
+    if connex.get("status") == "sealed":
+        raise ConnexSealedError()
 
 
 # ---------------------------------------------------------------------------
@@ -103,8 +120,7 @@ def create_connex(
     return connex
 
 
-def load_connex(connex_id: str) -> dict | None:
-    """Return the connex dict or None if not found."""
+def _load_connex_unlocked(connex_id: str) -> dict | None:
     path = _connex_path(connex_id)
     if not os.path.exists(path):
         return None
@@ -112,10 +128,20 @@ def load_connex(connex_id: str) -> dict | None:
         return json.load(fh)
 
 
+def load_connex(connex_id: str) -> dict | None:
+    """Return the connex dict or None if not found."""
+    return _load_connex_unlocked(connex_id)
+
+
 def save_connex(connex: dict) -> dict:
     """Persist connex to disk and return it (no changes to the dict)."""
     os.makedirs(CONNEXES_DIR, exist_ok=True)
-    _atomic_write(_connex_path(connex["connex_id"]), connex)
+    connex_id = connex["connex_id"]
+    with exclusive_file_lock(_connex_lock_path(connex_id)):
+        current = _load_connex_unlocked(connex_id)
+        if current is not None:
+            _ensure_mutable(current)
+        _atomic_write(_connex_path(connex_id), connex)
     return connex
 
 
@@ -133,34 +159,36 @@ def patch_connex(connex_id: str, patch: dict) -> dict | None:
 
     Returns the updated connex or None if not found.
     """
-    connex = load_connex(connex_id)
-    if connex is None:
-        return None
+    with exclusive_file_lock(_connex_lock_path(connex_id)):
+        connex = _load_connex_unlocked(connex_id)
+        if connex is None:
+            return None
+        _ensure_mutable(connex)
 
-    # Top-level scalar fields allowed via PUT.
-    for field in ("sun", "connex_no", "seal_no", "packed_by", "signed_by", "date", "ingest_job_id"):
-        if field in patch:
-            connex[field] = patch[field]
+        # Top-level scalar fields allowed via PUT.
+        for field in ("sun", "connex_no", "seal_no", "packed_by", "signed_by", "date", "ingest_job_id"):
+            if field in patch:
+                connex[field] = patch[field]
 
-    # Per-box updates.
-    if "boxes" in patch:
-        # Build a lookup from box_num to the existing box dict.
-        box_by_num = {b["box_num"]: b for b in connex["boxes"]}
-        for box_patch in patch["boxes"]:
-            box_num = box_patch.get("box_num")
-            if box_num is None or box_num not in box_by_num:
-                continue
-            box = box_by_num[box_num]
-            for field in ("label", "sloc", "shrh_poc"):
-                if field in box_patch:
-                    box[field] = box_patch[field]
-            if "individual_items" in box_patch:
-                box["individual_items"] = box_patch["individual_items"]
-            # Recompute completeness: has content AND has sloc AND has shrh_poc.
-            box["complete"] = _box_is_complete(box)
+        # Per-box updates.
+        if "boxes" in patch:
+            # Build a lookup from box_num to the existing box dict.
+            box_by_num = {b["box_num"]: b for b in connex["boxes"]}
+            for box_patch in patch["boxes"]:
+                box_num = box_patch.get("box_num")
+                if box_num is None or box_num not in box_by_num:
+                    continue
+                box = box_by_num[box_num]
+                for field in ("label", "sloc", "shrh_poc"):
+                    if field in box_patch:
+                        box[field] = box_patch[field]
+                if "individual_items" in box_patch:
+                    box["individual_items"] = box_patch["individual_items"]
+                # Recompute completeness: has content AND has sloc AND has shrh_poc.
+                box["complete"] = _box_is_complete(box)
 
-    _atomic_write(_connex_path(connex_id), connex)
-    return connex
+        _atomic_write(_connex_path(connex_id), connex)
+        return connex
 
 
 def attach_ingest_job(connex_id: str, ingest_job_id: str) -> dict | None:
@@ -184,16 +212,18 @@ def apply_bom_assignments(connex_id: str, bom_ids_by_box: dict[int, list[str]]) 
 
     Returns the updated connex or None if not found.
     """
-    connex = load_connex(connex_id)
-    if connex is None:
-        return None
+    with exclusive_file_lock(_connex_lock_path(connex_id)):
+        connex = _load_connex_unlocked(connex_id)
+        if connex is None:
+            return None
+        _ensure_mutable(connex)
 
-    for box in connex["boxes"]:
-        box["bom_ids"] = bom_ids_by_box.get(box["box_num"], [])
-        box["complete"] = _box_is_complete(box)
+        for box in connex["boxes"]:
+            box["bom_ids"] = bom_ids_by_box.get(box["box_num"], [])
+            box["complete"] = _box_is_complete(box)
 
-    _atomic_write(_connex_path(connex_id), connex)
-    return connex
+        _atomic_write(_connex_path(connex_id), connex)
+        return connex
 
 
 # ---------------------------------------------------------------------------
@@ -208,19 +238,21 @@ def add_box(connex_id: str) -> dict | None:
     numbering stays stable even after removals.  box_count is set to the new box
     count.  Returns the updated connex, or None if not found.
     """
-    connex = load_connex(connex_id)
-    if connex is None:
-        return None
+    with exclusive_file_lock(_connex_lock_path(connex_id)):
+        connex = _load_connex_unlocked(connex_id)
+        if connex is None:
+            return None
+        _ensure_mutable(connex)
 
-    boxes = connex.get("boxes", [])
-    next_num = (max((b["box_num"] for b in boxes), default=0)) + 1
-    boxes.append(_empty_box(next_num))
-    connex["boxes"] = boxes
-    connex["box_count"] = len(boxes)
+        boxes = connex.get("boxes", [])
+        next_num = (max((b["box_num"] for b in boxes), default=0)) + 1
+        boxes.append(_empty_box(next_num))
+        connex["boxes"] = boxes
+        connex["box_count"] = len(boxes)
 
-    recompute_box_completeness(connex)
-    _atomic_write(_connex_path(connex_id), connex)
-    return connex
+        recompute_box_completeness(connex)
+        _atomic_write(_connex_path(connex_id), connex)
+        return connex
 
 
 def remove_box(connex_id: str, box_num: int, force: bool = False) -> dict:
@@ -237,27 +269,29 @@ def remove_box(connex_id: str, box_num: int, force: bool = False) -> dict:
         {"ok": False, "error": str}                  — not found / not present / rejected
         {"ok": True,  "connex": dict}                — removed
     """
-    connex = load_connex(connex_id)
-    if connex is None:
-        return {"ok": False, "error": f"Connex '{connex_id}' not found."}
+    with exclusive_file_lock(_connex_lock_path(connex_id)):
+        connex = _load_connex_unlocked(connex_id)
+        if connex is None:
+            return {"ok": False, "error": f"Connex '{connex_id}' not found."}
+        _ensure_mutable(connex)
 
-    boxes = connex.get("boxes", [])
-    target = next((b for b in boxes if b["box_num"] == box_num), None)
-    if target is None:
-        return {"ok": False, "error": f"Box {box_num} does not exist."}
+        boxes = connex.get("boxes", [])
+        target = next((b for b in boxes if b["box_num"] == box_num), None)
+        if target is None:
+            return {"ok": False, "error": f"Box {box_num} does not exist."}
 
-    if _box_has_content(target) and not force:
-        return {
-            "ok": False,
-            "error": f"Box {box_num} has contents — pass force to remove it anyway.",
-        }
+        if _box_has_content(target) and not force:
+            return {
+                "ok": False,
+                "error": f"Box {box_num} has contents — pass force to remove it anyway.",
+            }
 
-    connex["boxes"] = [b for b in boxes if b["box_num"] != box_num]
-    connex["box_count"] = len(connex["boxes"])
+        connex["boxes"] = [b for b in boxes if b["box_num"] != box_num]
+        connex["box_count"] = len(connex["boxes"])
 
-    recompute_box_completeness(connex)
-    _atomic_write(_connex_path(connex_id), connex)
-    return {"ok": True, "connex": connex}
+        recompute_box_completeness(connex)
+        _atomic_write(_connex_path(connex_id), connex)
+        return {"ok": True, "connex": connex}
 
 
 # ---------------------------------------------------------------------------
@@ -328,18 +362,22 @@ def seal_connex(connex_id: str) -> dict:
     Returns:
         {"ok": bool, "errors": [str], "connex": dict | None}
     """
-    connex = load_connex(connex_id)
-    if connex is None:
-        return {"ok": False, "errors": ["Connex not found."], "connex": None}
+    with exclusive_file_lock(_connex_lock_path(connex_id)):
+        connex = _load_connex_unlocked(connex_id)
+        if connex is None:
+            return {"ok": False, "errors": ["Connex not found."], "connex": None}
 
-    errors = validate_seal(connex)
-    if errors:
-        return {"ok": False, "errors": errors, "connex": connex}
+        if connex.get("status") == "sealed":
+            return {"ok": True, "errors": [], "connex": connex}
 
-    connex["status"] = "sealed"
-    connex["sealed"] = _now_iso()
-    _atomic_write(_connex_path(connex_id), connex)
-    return {"ok": True, "errors": [], "connex": connex}
+        errors = validate_seal(connex)
+        if errors:
+            return {"ok": False, "errors": errors, "connex": connex}
+
+        connex["status"] = "sealed"
+        connex["sealed"] = _now_iso()
+        _atomic_write(_connex_path(connex_id), connex)
+        return {"ok": True, "errors": [], "connex": connex}
 
 
 # ---------------------------------------------------------------------------
@@ -357,6 +395,7 @@ def recompute_box_completeness(connex: dict) -> dict:
 
 
 __all__ = [
+    "ConnexSealedError",
     "create_connex",
     "load_connex",
     "save_connex",

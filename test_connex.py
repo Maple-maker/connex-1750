@@ -9,7 +9,9 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -117,6 +119,49 @@ class TestPatchConnex(unittest.TestCase):
         box1 = next(b for b in updated["boxes"] if b["box_num"] == 1)
         self.assertEqual(len(box1["individual_items"]), 1)
         self.assertEqual(box1["individual_items"][0]["description"], "Widget")
+
+
+class TestConcurrentMutations(unittest.TestCase):
+    def setUp(self):
+        shutil.rmtree(connex_store.CONNEXES_DIR, ignore_errors=True)
+        os.makedirs(connex_store.CONNEXES_DIR, exist_ok=True)
+
+    def test_updates_to_different_fields_are_not_lost(self):
+        cx = _fresh()
+        first_write_started = threading.Event()
+        release_first_write = threading.Event()
+        second_update_done = threading.Event()
+        original_atomic_write = connex_store._atomic_write
+
+        def delayed_atomic_write(path, data):
+            if data.get("packed_by") == "PACKER A" and not first_write_started.is_set():
+                first_write_started.set()
+                self.assertTrue(release_first_write.wait(timeout=2))
+            original_atomic_write(path, data)
+
+        def update_packer():
+            connex_store.patch_connex(cx["connex_id"], {"packed_by": "PACKER A"})
+
+        def update_signer():
+            connex_store.patch_connex(cx["connex_id"], {"signed_by": "SIGNER B"})
+            second_update_done.set()
+
+        with mock.patch.object(connex_store, "_atomic_write", side_effect=delayed_atomic_write):
+            first = threading.Thread(target=update_packer)
+            second = threading.Thread(target=update_signer)
+            first.start()
+            self.assertTrue(first_write_started.wait(timeout=2))
+            second.start()
+            second_update_done.wait(timeout=0.2)
+            release_first_write.set()
+            first.join(timeout=2)
+            second.join(timeout=2)
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        loaded = connex_store.load_connex(cx["connex_id"])
+        self.assertEqual(loaded["packed_by"], "PACKER A")
+        self.assertEqual(loaded["signed_by"], "SIGNER B")
 
 
 class TestBoxCompleteness(unittest.TestCase):
@@ -288,6 +333,72 @@ class TestSealConnex(unittest.TestCase):
         result = connex_store.seal_connex("nonexistent")
         self.assertFalse(result["ok"])
         self.assertIsNone(result["connex"])
+
+    def test_sealing_an_already_sealed_connex_is_idempotent(self):
+        cx = self._create_ready_connex()
+        with mock.patch.object(connex_store, "_now_iso", side_effect=["FIRST", "SECOND"]):
+            first = connex_store.seal_connex(cx["connex_id"])["connex"]
+            second = connex_store.seal_connex(cx["connex_id"])["connex"]
+        self.assertEqual(second["sealed"], first["sealed"])
+
+
+class TestSealedImmutability(unittest.TestCase):
+    def setUp(self):
+        shutil.rmtree(connex_store.CONNEXES_DIR, ignore_errors=True)
+        os.makedirs(connex_store.CONNEXES_DIR, exist_ok=True)
+        import app as flask_app
+        import job_store
+
+        self.client = flask_app.app.test_client()
+        self.job_store = job_store
+        cx = connex_store.create_connex(FAKE_PROFILE_ID, box_count=1)
+        connex_store.apply_bom_assignments(cx["connex_id"], {1: ["bom_abc"]})
+        connex_store.patch_connex(cx["connex_id"], {
+            "boxes": [{"box_num": 1, "sloc": "BLDG-1", "shrh_poc": "CPT X"}],
+            "packed_by": "1LT RABATIN",
+            "signed_by": "CPT HOLLAND",
+        })
+        self.connex = connex_store.seal_connex(cx["connex_id"])["connex"]
+
+    def assert_sealed_rejected(self, operation):
+        with self.assertRaises(connex_store.ConnexSealedError):
+            operation()
+
+    def test_store_rejects_every_mutation_path(self):
+        cid = self.connex["connex_id"]
+        changed = dict(self.connex, seal_no="CHANGED")
+        operations = [
+            lambda: connex_store.patch_connex(cid, {"seal_no": "CHANGED"}),
+            lambda: connex_store.attach_ingest_job(cid, "new-job"),
+            lambda: connex_store.apply_bom_assignments(cid, {1: ["other-bom"]}),
+            lambda: connex_store.add_box(cid),
+            lambda: connex_store.remove_box(cid, 1, force=True),
+            lambda: connex_store.save_connex(changed),
+        ]
+        for operation in operations:
+            self.assert_sealed_rejected(operation)
+
+    def test_put_route_returns_sealed_conflict(self):
+        response = self.client.put(
+            f"/api/connex/{self.connex['connex_id']}",
+            json={"seal_no": "CHANGED"},
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["code"], "SEALED")
+
+    def test_attach_route_returns_sealed_conflict(self):
+        job_id = "sealed-attach-job"
+        self.job_store.save_job(job_id, {
+            "boms": [{"bom_id": "bom-x", "items": []}],
+            "box_map": {},
+            "assigned_bom_ids": set(),
+        })
+        response = self.client.post(
+            f"/api/connex/{self.connex['connex_id']}/attach",
+            json={"ingest_job_id": job_id},
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["code"], "SEALED")
 
 
 class TestApplyBomAssignments(unittest.TestCase):
@@ -666,6 +777,23 @@ class TestAssignWarnings(unittest.TestCase):
         body = resp.get_json()
         self.assertIn("warnings", body)
         self.assertEqual(body["warnings"], [])
+
+    def test_separate_creates_real_box(self):
+        """A separated BOM must be assigned to a box persisted on the connex."""
+        job = self._js.load_job(self._job_id)
+        job["box_map"]["other-bom:1"] = 2
+        self._js.save_job(self._job_id, job)
+
+        resp = self._client.post(
+            f"/api/connex/{self._connex_id}/assign",
+            json={"moves": [{"bom_id": self._known_bom_id, "separate": True}]},
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        box3 = next(b for b in body["connex"]["boxes"] if b["box_num"] == 3)
+        self.assertIn(self._known_bom_id, box3["bom_ids"])
+        self.assertEqual(body["item_box_map"][f"{self._known_bom_id}:1"], 3)
 
 
 class TestBoxAddRemove(unittest.TestCase):

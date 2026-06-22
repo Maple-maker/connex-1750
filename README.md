@@ -11,7 +11,7 @@ The legacy 2D flat-file workflow (batch child-1750 → master 1750) is preserved
 | Layer | Technology |
 |-------|-----------|
 | Backend | Flask 3.0, Python 3.11, gunicorn |
-| Persistence | JSON files on disk (`data/profiles/`, `data/connexes/`) |
+| Persistence | SQLite ingest jobs (`data/jobs.db`) plus locked JSON profiles/connexes |
 | PDF render | reportlab, pypdf, pdfplumber |
 | Frontend | Vanilla JS ES modules, no framework, no build step |
 | Seal animation | Pure CSS 3D transforms (`playSealAnimation()` in `app.js`, `.seal-*` rules in `style.css`) — no WebGL, no three.js |
@@ -66,6 +66,8 @@ app.py                  Flask entrypoint — all routes (legacy + new /api/* lay
   │
   ├── profiles.py         Load/save/list/upsert Profile JSON (data/profiles/)
   ├── connex_store.py     CRUD + seal validation for Connex JSON (data/connexes/)
+  ├── file_lock.py        Cross-process locks for JSON read-modify-write transactions
+  ├── job_store.py        SQLite-backed ingest job persistence (data/jobs.db)
   ├── sitrep.py           Build SITREP JSON model (Contract C)
   │
   ├── render_core.py      DD1750 PDF renderer — header, pagination, battalion stamp
@@ -116,13 +118,14 @@ See `docs/DEPLOYMENT.md` for the full route table and `docs/handoff/backend.md` 
 ## Tests
 
 ```bash
-# Full test suite (existing + new)
-python3 -m pytest test_packing.py test_grouping.py test_reconcile.py \
-                  test_zero_on_hand.py test_bom_ingest.py test_shr_ingest.py \
-                  test_profiles.py test_connex.py test_sitrep.py -v
+# Full self-contained test suite
+python3 -m pytest -q
+
+# Optional live-server acceptance suite (requires localhost:8000 + fixture PDFs)
+RUN_LIVE_ACCEPTANCE=1 python3 -m pytest test_acceptance.py -v
 ```
 
-All 73 legacy packing tests plus the 59 new profile/connex/sitrep tests must pass.
+The default suite skips only tests that require external PDF fixtures or an independently running server.
 
 ---
 
@@ -130,6 +133,6 @@ All 73 legacy packing tests plus the 59 new profile/connex/sitrep tests must pas
 
 - **No build step.** Vanilla ES modules load directly in `index.html`. No webpack, vite, or node required.
 - **Seal animation is pure CSS.** The sealed-connex sequence at Step 5 is a hand-built CSS 3D-transform animation (`playSealAnimation()` + `.seal-*` rules) — no WebGL, no three.js, no canvas. A scoped `prefers-reduced-motion` fallback fades the overlay and stamp in without the door swing. See `docs/handoff/3d-connex.md`.
-- **Single gunicorn worker.** In-memory `JOBS` dict holds BOM ingest state. If the process restarts, BOM ingest must be re-run. This is intentional for a single-user tool.
-- **JSON persistence.** Human-readable, no migrations, fits the Railway deploy model. `data/` is gitignored at the file level; only `.gitkeep` markers are committed.
+- **Multi-worker persistence.** Ingest jobs use SQLite. Profile and connex JSON mutations hold cross-process file locks across each read-modify-write transaction, while atomic replacement prevents partial files.
+- **Human-readable manifests.** Profiles and connexes remain JSON for inspection and portability. `data/` is gitignored at the file level; only `.gitkeep` markers are committed.
 - **AI helper deferred.** The owl-alpha NSN/LIN suggestion helper is planned as a fast-follow. A stub route exists (`/api/ai/suggest-item`) and a hook is present in the PACKING step's individual item form. It is not wired in the current MVP.

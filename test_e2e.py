@@ -6,6 +6,7 @@ Validates the generated PDFs. Uses real sample BOMs + the real Commo SHR.
 """
 import io
 import os
+import sys
 import zipfile
 
 import app as flask_app
@@ -19,6 +20,16 @@ BOMS = [
     f"{ROOT}/FC BOMS/14T0016 A22496 AIMING CIRCLE M2A2.pdf",
 ]
 SHR = f"{ROOT}/Commo SHR ++ (1).pdf"
+
+_fixture_paths = [*BOMS, SHR]
+_missing_fixtures = [path for path in _fixture_paths if not os.path.exists(path)]
+if _missing_fixtures:
+    message = f"external PDF fixtures unavailable under {ROOT}"
+    if __name__ == "__main__":
+        print(f"SKIP: {message}")
+        sys.exit(0)
+    import pytest
+    pytest.skip(message, allow_module_level=True)
 
 c = flask_app.app.test_client()
 ok = True

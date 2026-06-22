@@ -14,6 +14,7 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 import app as flask_app
+import job_store
 from packing import (
     grouped_box_map,
     compact_box_map,
@@ -98,8 +99,14 @@ def test_compact_removes_gaps_preserving_order():
 
 def _inject_job(boms, box_map):
     job_id = "testjob"
-    flask_app.JOBS[job_id] = {"boms": boms, "shr": None, "reconciliation": None,
-                              "box_map": box_map, "created_at": "now"}
+    job_store.save_job(job_id, {
+        "boms": boms,
+        "shr": None,
+        "reconciliation": None,
+        "box_map": box_map,
+        "assigned_bom_ids": set(),
+        "created_at": "now",
+    })
     return job_id, flask_app.app.test_client()
 
 
@@ -136,7 +143,7 @@ def test_separate_pulls_one_item_into_new_box():
     assert body["box_by_bom"]["M4-0"] == 4
 
     # Master now shows 49 in the grouped box + 1 in its own.
-    job = flask_app.JOBS[job_id]
+    job = job_store.load_job(job_id)
     rows = boxes_to_master_rows(job["boms"], job["box_map"])
     cond = condense_master_rows(rows)
     # condense_master_rows merges by model+lin, so the lone M4 re-merges with

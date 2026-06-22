@@ -16,6 +16,8 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 
+from file_lock import exclusive_file_lock
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROFILES_DIR = os.path.join(BASE_DIR, "data", "profiles")
 
@@ -27,6 +29,10 @@ def _now_iso() -> str:
 
 def _profile_path(profile_id: str) -> str:
     return os.path.join(PROFILES_DIR, f"{profile_id}.json")
+
+
+def _profiles_lock_path() -> str:
+    return os.path.join(PROFILES_DIR, ".store.lock")
 
 
 def _atomic_write(path: str, data: dict) -> None:
@@ -101,54 +107,54 @@ def upsert_profile(
     Returns the final profile dict.
     """
     os.makedirs(PROFILES_DIR, exist_ok=True)
+    with exclusive_file_lock(_profiles_lock_path()):
+        # Search for an existing profile matching the unit identity.
+        existing = None
+        for p in list_profiles():
+            if (
+                p.get("brigade", "").strip() == brigade.strip()
+                and p.get("battalion", "").strip() == battalion.strip()
+                and p.get("battery", "").strip() == battery.strip()
+            ):
+                existing = p
+                break
 
-    # Search for an existing profile matching the unit identity.
-    existing = None
-    for p in list_profiles():
-        if (
-            p.get("brigade", "").strip() == brigade.strip()
-            and p.get("battalion", "").strip() == battalion.strip()
-            and p.get("battery", "").strip() == battery.strip()
-        ):
-            existing = p
-            break
+        now = _now_iso()
 
-    now = _now_iso()
+        if existing:
+            # Update mutable fields; preserve profile_id and created.
+            existing.update({
+                "uic": uic,
+                "default_packed_by": default_packed_by,
+                "default_shrh_poc": default_shrh_poc,
+                "stamp_text": stamp_text,
+                "brigade_image": brigade_image,
+                "division": division,
+                "division_image": division_image,
+                "battalion_image": battalion_image,
+                "last_used": now,
+            })
+            profile = existing
+        else:
+            profile = {
+                "profile_id": uuid.uuid4().hex,
+                "brigade": brigade,
+                "battalion": battalion,
+                "battery": battery,
+                "uic": uic,
+                "default_packed_by": default_packed_by,
+                "default_shrh_poc": default_shrh_poc,
+                "stamp_text": stamp_text,
+                "brigade_image": brigade_image,
+                "division": division,
+                "division_image": division_image,
+                "battalion_image": battalion_image,
+                "created": now,
+                "last_used": now,
+            }
 
-    if existing:
-        # Update mutable fields; preserve profile_id and created.
-        existing.update({
-            "uic": uic,
-            "default_packed_by": default_packed_by,
-            "default_shrh_poc": default_shrh_poc,
-            "stamp_text": stamp_text,
-            "brigade_image": brigade_image,
-            "division": division,
-            "division_image": division_image,
-            "battalion_image": battalion_image,
-            "last_used": now,
-        })
-        profile = existing
-    else:
-        profile = {
-            "profile_id": uuid.uuid4().hex,
-            "brigade": brigade,
-            "battalion": battalion,
-            "battery": battery,
-            "uic": uic,
-            "default_packed_by": default_packed_by,
-            "default_shrh_poc": default_shrh_poc,
-            "stamp_text": stamp_text,
-            "brigade_image": brigade_image,
-            "division": division,
-            "division_image": division_image,
-            "battalion_image": battalion_image,
-            "created": now,
-            "last_used": now,
-        }
-
-    _atomic_write(_profile_path(profile["profile_id"]), profile)
-    return profile
+        _atomic_write(_profile_path(profile["profile_id"]), profile)
+        return profile
 
 
 def touch_last_used(profile_id: str) -> dict | None:
@@ -156,12 +162,13 @@ def touch_last_used(profile_id: str) -> dict | None:
     Refresh last_used for profile_id.  Returns the updated profile, or None if
     the profile does not exist.
     """
-    profile = load_profile(profile_id)
-    if profile is None:
-        return None
-    profile["last_used"] = _now_iso()
-    _atomic_write(_profile_path(profile_id), profile)
-    return profile
+    with exclusive_file_lock(_profiles_lock_path()):
+        profile = load_profile(profile_id)
+        if profile is None:
+            return None
+        profile["last_used"] = _now_iso()
+        _atomic_write(_profile_path(profile_id), profile)
+        return profile
 
 
 __all__ = [

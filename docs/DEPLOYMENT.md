@@ -6,7 +6,7 @@ Audience: admin deploying to Railway for the first time or troubleshooting a bro
 
 ## Overview
 
-The tool ships as a single Python process: one gunicorn worker running the Flask app. No database, no message queue, no separate frontend build. The `data/` directory is the only stateful artifact — it lives on the Railway volume if persistence is configured (see §4).
+The tool ships as a Gunicorn-hosted Flask app with no separate frontend build or external database. Ingest jobs use a local SQLite database, while profiles and connexes use JSON files protected by cross-process locks. The `data/` directory is the only stateful artifact — it lives on the Railway volume if persistence is configured (see §4).
 
 The brigade insignia gallery (~97 formation images) is bundled under `static/formations/`. Assets are downscaled for fast loading on constrained networks and lazy-load in the gallery view at Step 1.
 
@@ -16,7 +16,7 @@ The brigade insignia gallery (~97 formation images) is bundled under `static/for
 
 | File | Purpose |
 |------|---------|
-| `Procfile` | Start command: `web: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 300 --workers 2` |
+| `Procfile` | Start command: `web: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 300 --workers 2 --threads 4` |
 | `railway.json` | Builder: NIXPACKS; start command; health check path `/api/health`; health check timeout 100s |
 | `runtime.txt` | Python version pin: `python-3.11.10` |
 | `requirements.txt` | All Python dependencies |
@@ -48,19 +48,9 @@ Health check: `GET /api/health` → `{"status":"ok"}`. Deploy is marked healthy 
 
 ---
 
-## Single-worker constraint
+## Multi-worker state safety
 
-`Procfile` specifies `--workers 2` but the in-memory `JOBS` dict is process-local. If Railway runs two workers and two requests land on different workers, BOM ingest state will not be shared.
-
-**For this tool, use `--workers 1`:**
-
-Set a custom start command in Railway → your service → Settings → Custom Start Command:
-
-```
-gunicorn app:app --bind 0.0.0.0:$PORT --timeout 300 --workers 1
-```
-
-This is safe for a single-unit tool with one or two concurrent operators.
+The checked-in two-worker, four-thread start command is supported. Ingest jobs are shared through SQLite. Connex updates use a per-record file lock, and profile upserts use a store-wide profile lock, so read-modify-write operations do not lose concurrent changes. Keep every worker on the same mounted `data/` directory.
 
 ---
 
@@ -68,13 +58,13 @@ This is safe for a single-unit tool with one or two concurrent operators.
 
 By default, Railway's filesystem is ephemeral — files written to `data/` are lost on redeploy.
 
-**To persist profiles and connexes across deploys:**
+**To persist jobs, profiles, and connexes across deploys:**
 
 1. In Railway → your service → Volumes → Add Volume.
 2. Mount path: `/app/data` (adjust to your repo root).
 3. Railway will write to and read from the persistent volume.
 
-Without a volume, operators must re-create their profile and re-ingest BOMs after every deploy. For a one-time packing operation this is acceptable; for ongoing unit use, configure the volume.
+Without a volume, operators must re-create their profile and re-ingest BOMs after every deploy. The volume contains `jobs.db`, `profiles/`, and `connexes/`. For a one-time packing operation ephemeral storage is acceptable; for ongoing unit use, configure the volume.
 
 ---
 

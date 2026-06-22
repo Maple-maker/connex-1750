@@ -9,8 +9,10 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import unittest
 import uuid
+from unittest import mock
 
 # Ensure the module root is on the path.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -146,6 +148,50 @@ class TestAtomicWrite(unittest.TestCase):
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
         self.assertEqual(data["profile_id"], p["profile_id"])
+
+
+class TestConcurrentMutations(unittest.TestCase):
+    def setUp(self):
+        shutil.rmtree(profiles.PROFILES_DIR, ignore_errors=True)
+        os.makedirs(profiles.PROFILES_DIR, exist_ok=True)
+
+    def test_concurrent_upserts_do_not_create_duplicate_profiles(self):
+        first_write_started = threading.Event()
+        release_first_write = threading.Event()
+        second_update_done = threading.Event()
+        original_atomic_write = profiles._atomic_write
+
+        def delayed_atomic_write(path, data):
+            if data.get("uic") == "FIRST" and not first_write_started.is_set():
+                first_write_started.set()
+                self.assertTrue(release_first_write.wait(timeout=2))
+            original_atomic_write(path, data)
+
+        def first_upsert():
+            profiles.upsert_profile("108th ADA", "2-55 ADA", "B", uic="FIRST")
+
+        def second_upsert():
+            profiles.upsert_profile("108th ADA", "2-55 ADA", "B", uic="SECOND")
+            second_update_done.set()
+
+        with mock.patch.object(profiles, "_atomic_write", side_effect=delayed_atomic_write):
+            first = threading.Thread(target=first_upsert)
+            second = threading.Thread(target=second_upsert)
+            first.start()
+            self.assertTrue(first_write_started.wait(timeout=2))
+            second.start()
+            second_update_done.wait(timeout=0.2)
+            release_first_write.set()
+            first.join(timeout=2)
+            second.join(timeout=2)
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        profile_files = [
+            name for name in os.listdir(profiles.PROFILES_DIR)
+            if name.endswith(".json")
+        ]
+        self.assertEqual(len(profile_files), 1)
 
 
 if __name__ == "__main__":
