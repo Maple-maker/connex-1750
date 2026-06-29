@@ -104,6 +104,12 @@ See `docs/DEPLOYMENT.md` for the full route table and `docs/handoff/backend.md` 
 
 ---
 
+## Review prompt playbook
+
+Use `docs/CODE_REVIEW_AGENT_PROMPTS.md` for a tiered checklist of reusable review prompts across safety, maintainability, architecture, and language-specific quality checks.
+
+---
+
 ## Environment variables
 
 | Variable | Required | Default | Purpose |
